@@ -1,0 +1,401 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Enums
+enum UserRole {
+  customer
+  bakery_owner
+  restaurant_owner
+  admin
+}
+
+enum AddressType {
+  home
+  work
+  other
+}
+
+enum BakeryStatus {
+  pending_approval
+  approved
+  rejected
+}
+
+enum RestaurantStatus {
+  pending_approval
+  approved
+  rejected
+}
+
+enum ItemType {
+  bakery
+  restaurant_menu
+}
+
+enum OrderStatus {
+  pending
+  confirmed
+  preparing
+  ready_for_pickup
+  out_for_delivery
+  delivered
+  completed
+  cancelled
+}
+
+enum OrderType {
+  pickup
+  delivery
+}
+
+enum PaymentMethod {
+  credit_card
+  debit_card
+  cash_on_delivery
+  wallet
+}
+
+enum PaymentStatus {
+  pending
+  paid
+  failed
+  refunded
+}
+
+enum ReviewType {
+  product
+  bakery
+  restaurant
+}
+
+enum NotificationType {
+  order
+  system
+  promotion
+  account
+}
+
+enum CategoryType {
+  bakery
+  restaurant
+  common
+}
+
+// Models
+model User {
+  id               String    @id @default(uuid())
+  username         String    @unique
+  email            String    @unique
+  password         String
+  fullName         String?   @map("full_name")
+  phoneNumber      String?   @map("phone_number")
+  role             UserRole  @default(customer)
+  isVerified       Boolean   @default(false) @map("is_verified")
+  profilePictureUrl String?   @map("profile_picture_url")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  createdBy        String?   @map("created_by")
+  updatedAt        DateTime? @updatedAt @map("updated_at")
+  updatedBy        String?   @map("updated_by")
+  deletedAt        DateTime? @map("deleted_at")
+
+  // Relations
+  addresses        Address[]
+  bakeries         Bakery[]
+  restaurants      Restaurant[]
+  reviews          Review[]
+  orders           Order[]
+  notifications    Notification[]
+  carts            Cart[]
+
+  @@map("users")
+}
+
+model Address {
+  id           String      @id @default(uuid())
+  userId       String      @map("user_id")
+  addressLine1 String      @map("address_line1")
+  addressLine2 String?     @map("address_line2")
+  city         String
+  postalCode   String      @map("postal_code")
+  country      String      @default("Saudi Arabia")
+  addressType  AddressType @default(home) @map("address_type")
+  isDefault    Boolean     @default(false) @map("is_default")
+  latitude     Decimal?    @db.Decimal(10, 8)
+  longitude    Decimal?    @db.Decimal(11, 8)
+  createdAt    DateTime    @default(now()) @map("created_at")
+  createdBy    String?     @map("created_by")
+  updatedAt    DateTime?   @updatedAt @map("updated_at")
+  updatedBy    String?     @map("updated_by")
+  deletedAt    DateTime?   @map("deleted_at")
+
+  // Relations
+  user         User        @relation(fields: [userId], references: [id])
+  orders       Order[]
+
+  @@map("addresses")
+}
+
+model Category {
+  id               String       @id @default(uuid())
+  name             String
+  description      String?
+  imageUrl         String?      @map("image_url")
+  type             CategoryType @default(common)
+  parentCategoryId String?      @map("parent_category_id")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  createdBy        String?      @map("created_by")
+  updatedAt        DateTime?    @updatedAt @map("updated_at")
+  updatedBy        String?      @map("updated_by")
+  deletedAt        DateTime?    @map("deleted_at")
+
+  // Relations
+  parentCategory   Category?    @relation("CategoryToSubcategory", fields: [parentCategoryId], references: [id])
+  subcategories    Category[]   @relation("CategoryToSubcategory")
+  products         Product[]
+
+  @@map("categories")
+}
+
+model Bakery {
+  id              String       @id @default(uuid())
+  name            String
+  description     String?
+  addressLine1    String       @map("address_line1")
+  addressLine2    String?      @map("address_line2")
+  city            String
+  postalCode      String       @map("postal_code")
+  country         String       @default("Saudi Arabia")
+  phoneNumber     String       @map("phone_number")
+  email           String?
+  logoUrl         String?      @map("logo_url")
+  coverImageUrl   String?      @map("cover_image_url")
+  operatingHours  Json?        @map("operating_hours")
+  status          BakeryStatus @default(pending_approval)
+  ownerId         String       @map("owner_id")
+  averageRating   Float        @default(0) @map("average_rating")
+  reviewCount     Int          @default(0) @map("review_count")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  createdBy       String?      @map("created_by")
+  updatedAt       DateTime?    @updatedAt @map("updated_at")
+  updatedBy       String?      @map("updated_by")
+  deletedAt       DateTime?    @map("deleted_at")
+
+  // Relations
+  owner           User         @relation(fields: [ownerId], references: [id])
+  products        Product[]
+  reviews         Review[]
+  orders          Order[]
+
+  @@map("bakeries")
+}
+
+model Restaurant {
+  id              String           @id @default(uuid())
+  name            String
+  description     String?
+  cuisineType     String?          @map("cuisine_type")
+  addressLine1    String           @map("address_line1")
+  addressLine2    String?          @map("address_line2")
+  city            String
+  postalCode      String           @map("postal_code")
+  country         String           @default("Saudi Arabia")
+  phoneNumber     String           @map("phone_number")
+  email           String?
+  logoUrl         String?          @map("logo_url")
+  coverImageUrl   String?          @map("cover_image_url")
+  operatingHours  Json?            @map("operating_hours")
+  status          RestaurantStatus @default(pending_approval)
+  ownerId         String           @map("owner_id")
+  averageRating   Float            @default(0) @map("average_rating")
+  reviewCount     Int              @default(0) @map("review_count")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  createdBy       String?          @map("created_by")
+  updatedAt       DateTime?        @updatedAt @map("updated_at")
+  updatedBy       String?          @map("updated_by")
+  deletedAt       DateTime?        @map("deleted_at")
+
+  // Relations
+  owner           User             @relation(fields: [ownerId], references: [id])
+  products        Product[]
+  reviews         Review[]
+  orders          Order[]
+
+  @@map("restaurants")
+}
+
+model Product {
+  id                    String    @id @default(uuid())
+  name                  String
+  description           String?
+  price                 Decimal   @db.Decimal(10, 2)
+  imageUrl              String?   @map("image_url")
+  itemType              ItemType  @map("item_type")
+  bakeryId              String?   @map("bakery_id")
+  restaurantId          String?   @map("restaurant_id")
+  categoryId            String?   @map("category_id")
+  stockQuantity         Int       @default(0) @map("stock_quantity")
+  preparationTimeMinutes Int?     @map("preparation_time_minutes")
+  dietaryInfo           Json?     @map("dietary_info")
+  isAvailable           Boolean   @default(true) @map("is_available")
+  averageRating         Float     @default(0) @map("average_rating")
+  reviewCount           Int       @default(0) @map("review_count")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  createdBy             String?   @map("created_by")
+  updatedAt             DateTime? @updatedAt @map("updated_at")
+  updatedBy             String?   @map("updated_by")
+  deletedAt             DateTime? @map("deleted_at")
+
+  // Relations
+  bakery                Bakery?   @relation(fields: [bakeryId], references: [id])
+  restaurant            Restaurant? @relation(fields: [restaurantId], references: [id])
+  category              Category? @relation(fields: [categoryId], references: [id])
+  reviews               Review[]
+  cartItems             CartItem[]
+  orderItems            OrderItem[]
+
+  @@map("products")
+}
+
+model Cart {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  totalAmount Decimal   @default(0) @map("total_amount") @db.Decimal(10, 2)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  createdBy   String?   @map("created_by")
+  updatedAt   DateTime? @updatedAt @map("updated_at")
+  updatedBy   String?   @map("updated_by")
+  deletedAt   DateTime? @map("deleted_at")
+
+  // Relations
+  user        User      @relation(fields: [userId], references: [id])
+  cartItems   CartItem[]
+
+  @@map("carts")
+}
+
+model CartItem {
+  id                  String    @id @default(uuid())
+  cartId              String    @map("cart_id")
+  productId           String    @map("product_id")
+  quantity            Int       @default(1)
+  price               Decimal   @db.Decimal(10, 2)
+  subtotal            Decimal   @db.Decimal(10, 2)
+  specialInstructions String?   @map("special_instructions")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  createdBy           String?   @map("created_by")
+  updatedAt           DateTime? @updatedAt @map("updated_at")
+  updatedBy           String?   @map("updated_by")
+  deletedAt           DateTime? @map("deleted_at")
+
+  // Relations
+  cart                Cart      @relation(fields: [cartId], references: [id])
+  product             Product   @relation(fields: [productId], references: [id])
+
+  @@map("cart_items")
+}
+
+model Order {
+  id                   String        @id @default(uuid())
+  userId               String        @map("user_id")
+  bakeryId             String?       @map("bakery_id")
+  restaurantId         String?       @map("restaurant_id")
+  orderNumber          String        @unique @map("order_number")
+  status               OrderStatus   @default(pending)
+  orderType            OrderType     @map("order_type")
+  deliveryAddressId    String?       @map("delivery_address_id")
+  totalAmount          Decimal       @map("total_amount") @db.Decimal(10, 2)
+  paymentMethod        PaymentMethod @map("payment_method")
+  paymentStatus        PaymentStatus @default(pending) @map("payment_status")
+  specialInstructions  String?       @map("special_instructions")
+  estimatedDeliveryTime DateTime?    @map("estimated_delivery_time")
+  actualDeliveryTime   DateTime?     @map("actual_delivery_time")
+  createdAt            DateTime      @default(now()) @map("created_at")
+  createdBy            String?       @map("created_by")
+  updatedAt            DateTime?     @updatedAt @map("updated_at")
+  updatedBy            String?       @map("updated_by")
+  deletedAt            DateTime?     @map("deleted_at")
+
+  // Relations
+  user                 User          @relation(fields: [userId], references: [id])
+  bakery               Bakery?       @relation(fields: [bakeryId], references: [id])
+  restaurant           Restaurant?   @relation(fields: [restaurantId], references: [id])
+  deliveryAddress      Address?      @relation(fields: [deliveryAddressId], references: [id])
+  orderItems           OrderItem[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id                  String    @id @default(uuid())
+  orderId             String    @map("order_id")
+  productId           String    @map("product_id")
+  quantity            Int       @default(1)
+  price               Decimal   @db.Decimal(10, 2)
+  subtotal            Decimal   @db.Decimal(10, 2)
+  specialInstructions String?   @map("special_instructions")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  createdBy           String?   @map("created_by")
+  updatedAt           DateTime? @updatedAt @map("updated_at")
+  updatedBy           String?   @map("updated_by")
+  deletedAt           DateTime? @map("deleted_at")
+
+  // Relations
+  order               Order     @relation(fields: [orderId], references: [id])
+  product             Product   @relation(fields: [productId], references: [id])
+
+  @@map("order_items")
+}
+
+model Review {
+  id           String     @id @default(uuid())
+  userId       String     @map("user_id")
+  rating       Int
+  comment      String?
+  reviewType   ReviewType @map("review_type")
+  productId    String?    @map("product_id")
+  bakeryId     String?    @map("bakery_id")
+  restaurantId String?    @map("restaurant_id")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  createdBy    String?    @map("created_by")
+  updatedAt    DateTime?  @updatedAt @map("updated_at")
+  updatedBy    String?    @map("updated_by")
+  deletedAt    DateTime?  @map("deleted_at")
+
+  // Relations
+  user         User       @relation(fields: [userId], references: [id])
+  product      Product?   @relation(fields: [productId], references: [id])
+  bakery       Bakery?    @relation(fields: [bakeryId], references: [id])
+  restaurant   Restaurant? @relation(fields: [restaurantId], references: [id])
+
+  @@map("reviews")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String           @map("user_id")
+  title     String
+  message   String
+  type      NotificationType @default(system)
+  isRead    Boolean          @default(false) @map("is_read")
+  relatedId String?          @map("related_id")
+  createdAt DateTime         @default(now()) @map("created_at")
+  createdBy String?          @map("created_by")
+  updatedAt DateTime?        @updatedAt @map("updated_at")
+  updatedBy String?          @map("updated_by")
+  deletedAt DateTime?        @map("deleted_at")
+
+  // Relations
+  user      User             @relation(fields: [userId], references: [id])
+
+  @@map("notifications")
+}
