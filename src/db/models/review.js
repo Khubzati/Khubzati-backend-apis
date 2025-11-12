@@ -1,104 +1,105 @@
-const { DataTypes } = require("sequelize");
+'use strict';
+const sharedColumns = require('./shared-columns');
 
-module.exports = (sequelize) => {
-  const Review = sequelize.define("Review", {
-    review_id: {
-      type: DataTypes.INTEGER,
-      primaryKey: true,
-      autoIncrement: true,
-    },
-    user_id: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      references: {
-        model: "users",
-        key: "user_id",
+module.exports = (sequelize, DataTypes) => {
+  const Review = sequelize.define(
+    'Review',
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
       },
-    },
-    product_id: {
-      type: DataTypes.INTEGER,
-      allowNull: true, // Review can be for a product, bakery, or restaurant
-      references: {
-        model: "products",
-        key: "product_id",
-      },
-    },
-    bakery_id: {
-      type: DataTypes.INTEGER,
-      allowNull: true,
-      references: {
-        model: "bakeries",
-        key: "bakery_id",
-      },
-    },
-    restaurant_id: {
-      type: DataTypes.INTEGER,
-      allowNull: true,
-      references: {
-        model: "restaurants",
-        key: "restaurant_id",
-      },
-    },
-    order_id: { // Optional: link review to a specific order
-        type: DataTypes.INTEGER,
-        allowNull: true,
+      userId: {
+        type: DataTypes.UUID,
+        field: 'user_id',
+        allowNull: false,
         references: {
-            model: "orders",
-            key: "order_id"
-        }
-    },
-    rating: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      validate: {
-        min: 1,
-        max: 5,
+          model: 'users',
+          key: 'id',
+        },
       },
+      rating: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        validate: {
+          min: 1,
+          max: 5,
+        },
+      },
+      comment: {
+        type: DataTypes.TEXT,
+      },
+      reviewType: {
+        type: DataTypes.ENUM('product', 'bakery', 'restaurant'),
+        field: 'review_type',
+        allowNull: false,
+      },
+      productId: {
+        type: DataTypes.UUID,
+        field: 'product_id',
+        references: {
+          model: 'products',
+          key: 'id',
+        },
+      },
+      bakeryId: {
+        type: DataTypes.UUID,
+        field: 'bakery_id',
+        references: {
+          model: 'bakeries',
+          key: 'id',
+        },
+      },
+      restaurantId: {
+        type: DataTypes.UUID,
+        field: 'restaurant_id',
+        references: {
+          model: 'restaurants',
+          key: 'id',
+        },
+      },
+      ...sharedColumns(sequelize, DataTypes),
     },
-    comment_en: { // Bilingual field
-      type: DataTypes.TEXT,
-      allowNull: true,
-    },
-    comment_ar: { // Bilingual field
-      type: DataTypes.TEXT,
-      allowNull: true,
-    },
-    // review_images: { // Array of image URLs for the review
-    //   type: DataTypes.JSON,
-    //   allowNull: true,
-    // },
-    // is_approved: { // If reviews need moderation
-    //   type: DataTypes.BOOLEAN,
-    //   defaultValue: true, // Or false if moderation is default
-    // },
-  }, {
-    tableName: "reviews",
-    timestamps: true, // Adds createdAt and updatedAt
-  });
+    {
+      tableName: 'reviews',
+      validate: {
+        validateReviewType() {
+          if (this.reviewType === 'product' && !this.productId) {
+            throw new Error('Product ID is required for product reviews');
+          }
+          if (this.reviewType === 'bakery' && !this.bakeryId) {
+            throw new Error('Bakery ID is required for bakery reviews');
+          }
+          if (this.reviewType === 'restaurant' && !this.restaurantId) {
+            throw new Error('Restaurant ID is required for restaurant reviews');
+          }
+        },
+      },
+    }
+  );
 
   Review.associate = (models) => {
     Review.belongsTo(models.User, {
-      foreignKey: "user_id",
-      as: "user"
+      foreignKey: 'userId',
+      as: 'user',
     });
+    
     Review.belongsTo(models.Product, {
-      foreignKey: "product_id",
-      as: "product"
+      foreignKey: 'productId',
+      as: 'product',
     });
+    
     Review.belongsTo(models.Bakery, {
-      foreignKey: "bakery_id",
-      as: "bakery"
+      foreignKey: 'bakeryId',
+      as: 'bakery',
     });
+    
     Review.belongsTo(models.Restaurant, {
-      foreignKey: "restaurant_id",
-      as: "restaurant"
-    });
-    Review.belongsTo(models.Order, {
-        foreignKey: "order_id",
-        as: "order"
+      foreignKey: 'restaurantId',
+      as: 'restaurant',
     });
   };
 
   return Review;
 };
-

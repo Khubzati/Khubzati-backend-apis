@@ -1,122 +1,135 @@
-const { DataTypes } = require("sequelize");
+'use strict';
+const sharedColumns = require('./shared-columns');
 
-module.exports = (sequelize) => {
-  const Product = sequelize.define("Product", {
-    product_id: {
-      type: DataTypes.INTEGER,
-      primaryKey: true,
-      autoIncrement: true,
-    },
-    bakery_id: { 
-      type: DataTypes.INTEGER,
-      allowNull: true, 
-      references: {
-        model: "bakeries",
-        key: "bakery_id",
+module.exports = (sequelize, DataTypes) => {
+  const Product = sequelize.define(
+    'Product',
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
       },
-    },
-    restaurant_id: { 
-      type: DataTypes.INTEGER,
-      allowNull: true,
-      references: {
-        model: "restaurants",
-        key: "restaurant_id",
+      name: {
+        type: DataTypes.STRING,
+        allowNull: false,
       },
-    },
-    category_id: {
-      type: DataTypes.INTEGER,
-      allowNull: true, 
-      references: { model: "categories", key: "category_id" }, // Added reference
-    },
-    name_en: { 
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    name_ar: { 
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    description_en: { 
-      type: DataTypes.TEXT,
-      allowNull: true,
-    },
-    description_ar: { 
-      type: DataTypes.TEXT,
-      allowNull: true,
-    },
-    price: {
-      type: DataTypes.DECIMAL(10, 2),
-      allowNull: false,
-    },
-    sku: {
-      type: DataTypes.STRING,
-      allowNull: true,
-      unique: true,
-    },
-    stock_quantity: {
-      type: DataTypes.INTEGER,
-      allowNull: true, 
-      defaultValue: 0,
-    },
-    image_url: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
-    additional_images: { 
-      type: DataTypes.JSON,
-      allowNull: true,
-    },
-    is_available: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: true,
-    },
-    nutritional_info_en: { 
-        type: DataTypes.JSON,
-        allowNull: true,
-    },
-    nutritional_info_ar: { 
-        type: DataTypes.JSON,
-        allowNull: true,
-    },
-    allergen_info_en: { 
+      description: {
         type: DataTypes.TEXT,
-        allowNull: true,
+      },
+      price: {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: false,
+      },
+      imageUrl: {
+        type: DataTypes.STRING,
+        field: 'image_url',
+      },
+      itemType: {
+        type: DataTypes.ENUM('bakery', 'restaurant_menu'),
+        field: 'item_type',
+        allowNull: false,
+      },
+      bakeryId: {
+        type: DataTypes.UUID,
+        field: 'bakery_id',
+        references: {
+          model: 'bakeries',
+          key: 'id',
+        },
+      },
+      restaurantId: {
+        type: DataTypes.UUID,
+        field: 'restaurant_id',
+        references: {
+          model: 'restaurants',
+          key: 'id',
+        },
+      },
+      categoryId: {
+        type: DataTypes.UUID,
+        field: 'category_id',
+        references: {
+          model: 'categories',
+          key: 'id',
+        },
+      },
+      stockQuantity: {
+        type: DataTypes.INTEGER,
+        field: 'stock_quantity',
+        defaultValue: 0,
+      },
+      preparationTimeMinutes: {
+        type: DataTypes.INTEGER,
+        field: 'preparation_time_minutes',
+      },
+      dietaryInfo: {
+        type: DataTypes.JSON,
+        field: 'dietary_info',
+      },
+      isAvailable: {
+        type: DataTypes.BOOLEAN,
+        field: 'is_available',
+        defaultValue: true,
+      },
+      averageRating: {
+        type: DataTypes.FLOAT,
+        field: 'average_rating',
+        defaultValue: 0,
+      },
+      reviewCount: {
+        type: DataTypes.INTEGER,
+        field: 'review_count',
+        defaultValue: 0,
+      },
+      ...sharedColumns(sequelize, DataTypes),
     },
-    allergen_info_ar: { 
-        type: DataTypes.TEXT,
-        allowNull: true,
-    },
-    average_rating: {
-      type: DataTypes.DECIMAL(2, 1),
-      defaultValue: 0.0,
-    },
-    total_ratings: {
-      type: DataTypes.INTEGER,
-      defaultValue: 0,
-    },
-  }, {
-    tableName: "products",
-    timestamps: true,
-  });
+    {
+      tableName: 'products',
+      validate: {
+        eitherBakeryOrRestaurant() {
+          if (this.itemType === 'bakery' && !this.bakeryId) {
+            throw new Error('Bakery ID is required for bakery items');
+          }
+          if (this.itemType === 'restaurant_menu' && !this.restaurantId) {
+            throw new Error('Restaurant ID is required for restaurant menu items');
+          }
+        },
+      },
+    }
+  );
 
   Product.associate = (models) => {
     Product.belongsTo(models.Bakery, {
-      foreignKey: "bakery_id",
-      as: "bakery"
+      foreignKey: 'bakeryId',
+      as: 'bakery',
     });
+    
     Product.belongsTo(models.Restaurant, {
-        foreignKey: "restaurant_id",
-        as: "restaurant"
+      foreignKey: 'restaurantId',
+      as: 'restaurant',
     });
-    Product.belongsTo(models.Category, { // Added association
-        foreignKey: "category_id", 
-        as: "category" 
+    
+    Product.belongsTo(models.Category, {
+      foreignKey: 'categoryId',
+      as: 'category',
     });
-    // Product.hasMany(models.Review, { foreignKey: 'product_id', as: 'reviews' });
-    // Product.hasMany(models.OrderItem, { foreignKey: 'product_id', as: 'orderItems' });
-    // Product.hasMany(models.CartItem, { foreignKey: 'product_id', as: 'cartItems' });
+    
+    Product.hasMany(models.Review, {
+      foreignKey: 'productId',
+      as: 'reviews',
+    });
+    
+    Product.hasMany(models.CartItem, {
+      foreignKey: 'productId',
+      as: 'cartItems',
+    });
+    
+    Product.hasMany(models.OrderItem, {
+      foreignKey: 'productId',
+      as: 'orderItems',
+    });
   };
 
   return Product;
 };
-

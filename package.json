@@ -4,31 +4,46 @@
   "description": "",
   "main": "app.js",
   "scripts": {
-    "start": "node ./src/app.js",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
     "start:dev": "nodemon ./src/app.js --watch",
     "migrate:up": "npx sequelize-cli db:migrate",
     "migrate:undo": "npx sequelize-cli db:migrate:undo",
+    "create-admin": "node src/scripts/create-admin.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@supabase/ssr": "^0.7.0",
+    "@supabase/supabase-js": "^2.49.9",
+    "@types/node": "^20.11.19",
+    "@types/react": "^18.2.57",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
     "express-validator": "^7.2.1",
+    "firebase-admin": "^13.6.0",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "next": "^14.1.0",
     "pg": "^8.13.0",
     "pg-hstore": "^2.3.4",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
     "sequelize": "^6.37.3"
   },
   "devDependencies": {
     "@prisma/client": "^6.8.2",
+    "@types/jsonwebtoken": "^9.0.9",
     "nodemon": "^3.1.7",
     "prisma": "^6.8.2",
-    "sequelize-cli": "^6.6.2"
+    "sequelize-cli": "^6.6.2",
+    "typescript": "^5.3.3"
   }
 }

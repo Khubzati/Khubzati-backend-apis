@@ -1,74 +1,81 @@
-const { DataTypes } = require("sequelize");
+'use strict';
+const sharedColumns = require('./shared-columns');
 
-module.exports = (sequelize) => {
-  const Address = sequelize.define("Address", {
-    address_id: {
-      type: DataTypes.INTEGER,
-      primaryKey: true,
-      autoIncrement: true,
-    },
-    user_id: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      references: {
-        model: "users", // Name of the table, not the model
-        key: "user_id",
+module.exports = (sequelize, DataTypes) => {
+  const Address = sequelize.define(
+    'Address',
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
       },
+      userId: {
+        type: DataTypes.UUID,
+        field: 'user_id',
+        allowNull: false,
+        references: {
+          model: 'users',
+          key: 'id',
+        },
+      },
+      addressLine1: {
+        type: DataTypes.STRING,
+        field: 'address_line1',
+        allowNull: false,
+      },
+      addressLine2: {
+        type: DataTypes.STRING,
+        field: 'address_line2',
+      },
+      city: {
+        type: DataTypes.STRING,
+        allowNull: false,
+      },
+      postalCode: {
+        type: DataTypes.STRING,
+        field: 'postal_code',
+        allowNull: false,
+      },
+      country: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        defaultValue: 'Saudi Arabia',
+      },
+      addressType: {
+        type: DataTypes.ENUM('home', 'work', 'other'),
+        field: 'address_type',
+        defaultValue: 'home',
+      },
+      isDefault: {
+        type: DataTypes.BOOLEAN,
+        field: 'is_default',
+        defaultValue: false,
+      },
+      latitude: {
+        type: DataTypes.DECIMAL(10, 8),
+      },
+      longitude: {
+        type: DataTypes.DECIMAL(11, 8),
+      },
+      ...sharedColumns(sequelize, DataTypes),
     },
-    address_line1: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    address_line2: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
-    city: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    state_province_region: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
-    postal_code: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    country: {
-      type: DataTypes.STRING,
-      allowNull: false,
-      defaultValue: "DefaultCountry", // As per schema doc
-    },
-    address_type: {
-      type: DataTypes.ENUM("home", "work", "other"),
-      allowNull: true,
-      defaultValue: "home",
-    },
-    is_default: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: false,
-    },
-    latitude: {
-      type: DataTypes.DECIMAL(10, 8), // Precision and scale for lat/lng
-      allowNull: true,
-    },
-    longitude: {
-      type: DataTypes.DECIMAL(11, 8), // Precision and scale for lat/lng
-      allowNull: true,
-    },
-  }, {
-    tableName: "addresses",
-    timestamps: true,
-  });
+    {
+      tableName: 'addresses',
+    }
+  );
 
   Address.associate = (models) => {
     Address.belongsTo(models.User, {
-      foreignKey: "user_id",
-      as: "user"
+      foreignKey: 'userId',
+      as: 'user',
+    });
+    
+    Address.hasMany(models.Order, {
+      foreignKey: 'deliveryAddressId',
+      as: 'orders',
     });
   };
 
   return Address;
 };
-

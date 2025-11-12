@@ -1,140 +1,123 @@
-const { DataTypes } = require("sequelize");
+'use strict';
+const sharedColumns = require('./shared-columns');
 
-module.exports = (sequelize) => {
-  const Restaurant = sequelize.define("Restaurant", {
-    restaurant_id: {
-      type: DataTypes.INTEGER,
-      primaryKey: true,
-      autoIncrement: true,
-    },
-    owner_id: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      references: {
-        model: "users",
-        key: "user_id",
+module.exports = (sequelize, DataTypes) => {
+  const Restaurant = sequelize.define(
+    'Restaurant',
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
       },
-    },
-    name_en: { // Bilingual field
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    name_ar: { // Bilingual field
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    description_en: { // Bilingual field
-      type: DataTypes.TEXT,
-      allowNull: true,
-    },
-    description_ar: { // Bilingual field
-      type: DataTypes.TEXT,
-      allowNull: true,
-    },
-    cuisine_type_en: { // Bilingual field
+      name: {
         type: DataTypes.STRING,
-        allowNull: true,
-    },
-    cuisine_type_ar: { // Bilingual field
-        type: DataTypes.STRING,
-        allowNull: true,
-    },
-    profile_image_url: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
-    cover_image_url: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
-    address_line1: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    address_line2: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
-    city: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    state_province_region: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
-    postal_code: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    country: {
-      type: DataTypes.STRING,
-      allowNull: false,
-      defaultValue: "DefaultCountry",
-    },
-    phone_number: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
-    email: {
-      type: DataTypes.STRING,
-      allowNull: true,
-      validate: {
-        isEmail: true,
+        allowNull: false,
       },
+      description: {
+        type: DataTypes.TEXT,
+      },
+      cuisineType: {
+        type: DataTypes.STRING,
+        field: 'cuisine_type',
+      },
+      addressLine1: {
+        type: DataTypes.STRING,
+        field: 'address_line1',
+        allowNull: false,
+      },
+      addressLine2: {
+        type: DataTypes.STRING,
+        field: 'address_line2',
+      },
+      city: {
+        type: DataTypes.STRING,
+        allowNull: false,
+      },
+      postalCode: {
+        type: DataTypes.STRING,
+        field: 'postal_code',
+        allowNull: false,
+      },
+      country: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        defaultValue: 'Saudi Arabia',
+      },
+      phoneNumber: {
+        type: DataTypes.STRING,
+        field: 'phone_number',
+        allowNull: false,
+      },
+      email: {
+        type: DataTypes.STRING,
+        validate: {
+          isEmail: true,
+        },
+      },
+      logoUrl: {
+        type: DataTypes.STRING,
+        field: 'logo_url',
+      },
+      coverImageUrl: {
+        type: DataTypes.STRING,
+        field: 'cover_image_url',
+      },
+      operatingHours: {
+        type: DataTypes.JSON,
+        field: 'operating_hours',
+      },
+      status: {
+        type: DataTypes.ENUM('pending_approval', 'approved', 'rejected'),
+        defaultValue: 'pending_approval',
+      },
+      ownerId: {
+        type: DataTypes.UUID,
+        field: 'owner_id',
+        allowNull: false,
+        references: {
+          model: 'users',
+          key: 'id',
+        },
+      },
+      averageRating: {
+        type: DataTypes.FLOAT,
+        field: 'average_rating',
+        defaultValue: 0,
+      },
+      reviewCount: {
+        type: DataTypes.INTEGER,
+        field: 'review_count',
+        defaultValue: 0,
+      },
+      ...sharedColumns(sequelize, DataTypes),
     },
-    operating_hours: {
-      type: DataTypes.JSON, // e.g., {"Mon": "10am-10pm", ...}
-      allowNull: true,
-    },
-    latitude: {
-      type: DataTypes.DECIMAL(10, 8),
-      allowNull: true,
-    },
-    longitude: {
-      type: DataTypes.DECIMAL(11, 8),
-      allowNull: true,
-    },
-    status: {
-      type: DataTypes.ENUM("pending_approval", "approved", "rejected", "suspended"),
-      defaultValue: "pending_approval",
-    },
-    average_rating: {
-      type: DataTypes.DECIMAL(2, 1),
-      defaultValue: 0.0,
-    },
-    total_ratings: {
-      type: DataTypes.INTEGER,
-      defaultValue: 0,
-    },
-    // Specific to restaurants as per schema
-    table_booking_available: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-    },
-    delivery_available: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: true,
-    },
-    pickup_available: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: true,
+    {
+      tableName: 'restaurants',
     }
-  }, {
-    tableName: "restaurants",
-    timestamps: true,
-  });
+  );
 
   Restaurant.associate = (models) => {
     Restaurant.belongsTo(models.User, {
-      foreignKey: "owner_id",
-      as: "owner"
+      foreignKey: 'ownerId',
+      as: 'owner',
     });
-    // Restaurant.hasMany(models.Product, { foreignKey: 'restaurant_id', as: 'products' }); // If restaurants also sell products directly
-    // Restaurant.hasMany(models.Review, { foreignKey: 'restaurant_id', as: 'reviews' });
-    // Restaurant.hasMany(models.Order, { foreignKey: 'restaurant_id', as: 'orders' });
+    
+    Restaurant.hasMany(models.Product, {
+      foreignKey: 'restaurantId',
+      as: 'products',
+    });
+    
+    Restaurant.hasMany(models.Review, {
+      foreignKey: 'restaurantId',
+      as: 'reviews',
+    });
+    
+    Restaurant.hasMany(models.Order, {
+      foreignKey: 'restaurantId',
+      as: 'orders',
+    });
   };
 
   return Restaurant;
 };
-
