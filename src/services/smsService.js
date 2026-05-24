@@ -103,10 +103,13 @@ const sendOTPviaTwilio = async (phoneNumber, otpCode) => {
         const normalizedPhone = normalizePhoneNumber(phoneNumber);
         const messageBody = `Your Khubzati verification code is: ${otpCode}. Valid for 10 minutes.`;
 
+        // Prefer Messaging Service SID if provided; otherwise use the configured from number.
         const message = await client.messages.create({
             body: messageBody,
-            from: process.env.TWILIO_PHONE_NUMBER,
             to: normalizedPhone,
+            ...(process.env.TWILIO_MESSAGING_SERVICE_SID
+                ? { messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID }
+                : { from: process.env.TWILIO_PHONE_NUMBER }),
         });
 
         console.log(`✅ SMS sent via Twilio to ${normalizedPhone}. Message SID: ${message.sid}`);
@@ -170,4 +173,3 @@ module.exports = {
     sendOTPviaTwilio,
     normalizePhoneNumber,
 };
-

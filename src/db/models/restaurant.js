@@ -71,6 +71,14 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.ENUM('pending_approval', 'approved', 'rejected'),
         defaultValue: 'pending_approval',
       },
+      rejectionReason: {
+        type: DataTypes.TEXT,
+        field: 'rejection_reason',
+      },
+      rejectedAt: {
+        type: DataTypes.DATE,
+        field: 'rejected_at',
+      },
       ownerId: {
         type: DataTypes.UUID,
         field: 'owner_id',

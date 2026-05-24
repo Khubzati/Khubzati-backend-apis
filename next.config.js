@@ -25,9 +25,9 @@ const nextConfig = {
     },
     // Allow development origins
     allowedDevOrigins: [
-        'http://localhost:3000',
-        'http://127.0.0.1:3000',
-        'http://172.20.10.4:3000', // Add your specific IP
+        'http://localhost:3000/v1',
+        'http://127.0.0.1:3000/v1',
+        'http://172.20.10.4:3000/v1', // Add your specific IP
     ],
 }
 

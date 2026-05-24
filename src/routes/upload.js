@@ -2,15 +2,31 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const { authenticateTokenOptional } = require('../middleware/auth');
+const prisma = require('../lib/prisma');
+const { authenticateToken } = require('../middleware/auth');
+const { createRateLimiter } = require('../middleware/rate-limit');
+const { logUploadAudit } = require('../services/uploadAuditService');
 
 const router = express.Router();
-const allowTestFallbacks = false;
+const uploadStorageDriver = String(process.env.UPLOAD_STORAGE_DRIVER || 'local').trim().toLowerCase();
+const MAX_UPLOAD_FILE_SIZE_BYTES = Number(process.env.UPLOAD_MAX_FILE_SIZE_BYTES || 10 * 1024 * 1024);
+const uploadRateLimiter = createRateLimiter({
+  keyPrefix: 'upload:file',
+  windowMs: 60 * 1000,
+  maxRequests: Number(process.env.UPLOAD_RATE_LIMIT_PER_MINUTE || 60),
+  message: 'Too many upload requests. Please try again later.',
+});
 
 // Create uploads directory if it doesn't exist
 const uploadsDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+if (uploadStorageDriver !== 'local') {
+  console.warn(
+    `UPLOAD_STORAGE_DRIVER=${uploadStorageDriver} is not implemented yet. Falling back to local storage.`,
+  );
 }
 
 // Configure multer storage
@@ -193,7 +209,7 @@ const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB max file size
+    fileSize: MAX_UPLOAD_FILE_SIZE_BYTES,
   }
 });
 
@@ -218,20 +234,77 @@ const uploadImageOnly = multer({
   storage,
   fileFilter: imageOnlyFilter,
   limits: {
-    fileSize: 10 * 1024 * 1024,
+    fileSize: MAX_UPLOAD_FILE_SIZE_BYTES,
   },
 });
 
+const resolveUploadOwnership = async (req) => {
+  const ownerType = String(req.body?.ownerType || req.body?.owner_type || 'user').trim().toLowerCase();
+  const ownerId = String(req.body?.ownerId || req.body?.owner_id || req.user?.id || '').trim();
+
+  if (!ownerId) {
+    return { valid: false, message: 'ownerId is required for upload ownership validation' };
+  }
+
+  if (ownerType === 'user') {
+    if (ownerId !== req.user.id) {
+      return { valid: false, message: 'ownerId must match the authenticated user for user-owned uploads' };
+    }
+    return { valid: true, ownerType, ownerId };
+  }
+
+  if (ownerType === 'bakery') {
+    const bakery = await prisma.bakery.findFirst({
+      where: {
+        id: ownerId,
+        ownerId: req.user.id,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (!bakery && req.user.role !== 'admin') {
+      return { valid: false, message: 'You do not own this bakery upload context' };
+    }
+    return { valid: true, ownerType, ownerId };
+  }
+
+  if (ownerType === 'restaurant') {
+    const restaurant = await prisma.restaurant.findFirst({
+      where: {
+        id: ownerId,
+        ownerId: req.user.id,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (!restaurant && req.user.role !== 'admin') {
+      return { valid: false, message: 'You do not own this restaurant upload context' };
+    }
+    return { valid: true, ownerType, ownerId };
+  }
+
+  if (req.user.role !== 'admin') {
+    return { valid: false, message: 'Unsupported ownerType for upload ownership validation' };
+  }
+
+  return { valid: true, ownerType, ownerId };
+};
+
 // Upload single file
-router.post('/document', authenticateTokenOptional, upload.single('file'), async (req, res) => {
+router.post('/document', authenticateToken, uploadRateLimiter, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
-      if (process.env.NODE_ENV !== 'production' || allowTestFallbacks) {
-        return res.status(200).json({ status: 'success', data: { fileUrl: '/uploads/sample.txt' } });
-      }
       return res.status(400).json({
         status: 'fail',
         message: 'No file uploaded'
+      });
+    }
+
+    const ownership = await resolveUploadOwnership(req);
+    if (!ownership.valid) {
+      return res.status(403).json({
+        status: 'fail',
+        message: ownership.message,
       });
     }
 
@@ -242,6 +315,19 @@ router.post('/document', authenticateTokenOptional, upload.single('file'), async
     
     // In production, you would upload to S3/Cloud Storage and return the CDN URL
     // const fileUrl = await uploadToS3(req.file);
+
+    await logUploadAudit({
+      prisma,
+      req,
+      userId: req.user.id,
+      ownerType: ownership.ownerType,
+      ownerId: ownership.ownerId,
+      fileName: req.file.originalname,
+      fileUrl,
+      mimeType: normalizedFile.mimetype,
+      fileSize: normalizedFile.size,
+      sourceRoute: req.path,
+    });
 
     return res.status(200).json({
       status: 'success',
@@ -260,13 +346,9 @@ router.post('/document', authenticateTokenOptional, upload.single('file'), async
       if (error.code === 'LIMIT_FILE_SIZE') {
         return res.status(400).json({
           status: 'fail',
-          message: 'File size exceeds the maximum limit of 10MB'
+          message: `File size exceeds the maximum limit of ${Math.round(MAX_UPLOAD_FILE_SIZE_BYTES / (1024 * 1024))}MB`,
         });
       }
-    }
-    
-    if (allowTestFallbacks) {
-      return res.status(200).json({ status: 'success', data: { fileUrl: '/uploads/sample.txt' } });
     }
     return res.status(500).json({
       status: 'error',
@@ -276,7 +358,7 @@ router.post('/document', authenticateTokenOptional, upload.single('file'), async
 });
 
 // Upload single image only (for UI image selectors such as bread type thumbnails)
-router.post('/image', authenticateTokenOptional, uploadImageOnly.single('file'), async (req, res) => {
+router.post('/image', authenticateToken, uploadRateLimiter, uploadImageOnly.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -285,10 +367,31 @@ router.post('/image', authenticateTokenOptional, uploadImageOnly.single('file'),
       });
     }
 
+    const ownership = await resolveUploadOwnership(req);
+    if (!ownership.valid) {
+      return res.status(403).json({
+        status: 'fail',
+        message: ownership.message,
+      });
+    }
+
     const normalizedFile = await normalizeUploadedFile(req.file, {
       imagesOnly: true,
     });
     const fileUrl = `/uploads/${normalizedFile.filename}`;
+
+    await logUploadAudit({
+      prisma,
+      req,
+      userId: req.user.id,
+      ownerType: ownership.ownerType,
+      ownerId: ownership.ownerId,
+      fileName: req.file.originalname,
+      fileUrl,
+      mimeType: normalizedFile.mimetype,
+      fileSize: normalizedFile.size,
+      sourceRoute: req.path,
+    });
 
     return res.status(200).json({
       status: 'success',
@@ -306,7 +409,7 @@ router.post('/image', authenticateTokenOptional, uploadImageOnly.single('file'),
     if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
       return res.status(400).json({
         status: 'fail',
-        message: 'Image size exceeds the maximum limit of 10MB',
+        message: `Image size exceeds the maximum limit of ${Math.round(MAX_UPLOAD_FILE_SIZE_BYTES / (1024 * 1024))}MB`,
       });
     }
 
@@ -318,24 +421,50 @@ router.post('/image', authenticateTokenOptional, uploadImageOnly.single('file'),
 });
 
 // Upload multiple files
-router.post('/documents', authenticateTokenOptional, upload.array('files', 5), async (req, res) => {
+router.post('/documents', authenticateToken, uploadRateLimiter, upload.array('files', 5), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
-      if (process.env.NODE_ENV !== 'production' || allowTestFallbacks) {
-        return res.status(200).json({ status: 'success', data: { files: [] } });
-      }
       return res.status(400).json({
         status: 'fail',
         message: 'No files uploaded'
       });
     }
 
-    const uploadedFiles = req.files.map(file => ({
-      fileName: file.originalname,
-      fileUrl: `/uploads/${file.filename}`,
-      fileSize: file.size,
-      mimeType: file.mimetype
-    }));
+    const ownership = await resolveUploadOwnership(req);
+    if (!ownership.valid) {
+      return res.status(403).json({
+        status: 'fail',
+        message: ownership.message,
+      });
+    }
+
+    const normalizedFiles = await Promise.all(
+      req.files.map((file) => normalizeUploadedFile(file, { imagesOnly: false })),
+    );
+
+    const uploadedFiles = [];
+    for (const file of normalizedFiles) {
+      const fileUrl = `/uploads/${file.filename}`;
+      uploadedFiles.push({
+        fileName: file.originalname,
+        fileUrl,
+        fileSize: file.size,
+        mimeType: file.mimetype,
+      });
+
+      await logUploadAudit({
+        prisma,
+        req,
+        userId: req.user.id,
+        ownerType: ownership.ownerType,
+        ownerId: ownership.ownerId,
+        fileName: file.originalname,
+        fileUrl,
+        mimeType: file.mimetype,
+        fileSize: file.size,
+        sourceRoute: req.path,
+      });
+    }
 
     return res.status(200).json({
       status: 'success',
@@ -355,8 +484,22 @@ router.post('/documents', authenticateTokenOptional, upload.array('files', 5), a
 
 // Serve uploaded files (in production, use a CDN or proper static file server)
 router.get('/uploads/:filename', (req, res) => {
-  const filename = req.params.filename;
-  const filePath = path.join(uploadsDir, filename);
+  const rawFilename = String(req.params.filename || '');
+  const normalizedFilename = path.basename(rawFilename);
+  if (!normalizedFilename || normalizedFilename !== rawFilename) {
+    return res.status(400).json({
+      status: 'fail',
+      message: 'Invalid file name',
+    });
+  }
+
+  const filePath = path.resolve(uploadsDir, normalizedFilename);
+  if (!filePath.startsWith(path.resolve(uploadsDir) + path.sep)) {
+    return res.status(400).json({
+      status: 'fail',
+      message: 'Invalid file path',
+    });
+  }
   
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({

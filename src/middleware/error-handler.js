@@ -1,11 +1,20 @@
 const { validationResult } = require('express-validator');
-const { PrismaClient } = require('../generated/prisma');
-
-const prisma = new PrismaClient();
 
 // Global error handler middleware
 const errorHandler = (err, req, res, next) => {
-  console.error('Error:', err);
+  const requestId = req.requestId || req.headers['x-request-id'] || null;
+  console.error(
+    JSON.stringify({
+      level: 'error',
+      requestId,
+      method: req.method,
+      path: req.originalUrl,
+      message: err?.message || 'Unhandled error',
+      stack: err?.stack,
+      code: err?.code,
+      statusCode: err?.statusCode,
+    }),
+  );
 
   // Default error status and message
   let statusCode = 500;
@@ -47,7 +56,8 @@ const errorHandler = (err, req, res, next) => {
 
   res.status(statusCode).json({
     status: 'error',
-    message
+    message,
+    requestId,
   });
 };
 
@@ -58,7 +68,8 @@ const validationErrorHandler = (req, res, next) => {
     return res.status(400).json({
       status: 'fail',
       message: 'Validation error',
-      errors: errors.array()
+      errors: errors.array(),
+      requestId: req.requestId || req.headers['x-request-id'] || null,
     });
   }
   next();
@@ -68,7 +79,8 @@ const validationErrorHandler = (req, res, next) => {
 const notFoundHandler = (req, res, next) => {
   res.status(404).json({
     status: 'fail',
-    message: `Route not found: ${req.originalUrl}`
+    message: `Route not found: ${req.originalUrl}`,
+    requestId: req.requestId || req.headers['x-request-id'] || null,
   });
 };
 

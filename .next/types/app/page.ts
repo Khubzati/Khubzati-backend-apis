@@ -1,4 +1,4 @@
-// File: /Users/user/Desktop/Khubzati-backend-apis/src/app/page.tsx
+// File: /Users/user/Documents/Khubzati-App/Khubzati-backend-apis/src/app/page.tsx
 import * as entry from '../../../src/app/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

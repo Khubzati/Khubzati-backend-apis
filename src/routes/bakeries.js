@@ -1,10 +1,9 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { PrismaClient } = require('../generated/prisma');
+const prisma = require('../lib/prisma');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 
-const prisma = new PrismaClient();
 const router = express.Router();
 const uploadsDir = path.join(__dirname, '../../uploads');
 
@@ -105,6 +104,15 @@ function buildBakeryAssetPayload({ logoUrl, coverImageUrl }) {
   }
 
   return payload;
+}
+
+function normalizeDeliveryProvider(rawValue) {
+  if (typeof rawValue !== 'string') return 'third_party';
+  const normalizedValue = rawValue.trim().toLowerCase();
+  if (normalizedValue === 'bakery' || normalizedValue === 'third_party') {
+    return normalizedValue;
+  }
+  return null;
 }
 
 function serializeBakery(req, bakery) {
@@ -215,6 +223,7 @@ router.get('/', async (req, res) => {
           country: true,
           phoneNumber: true,
           email: true,
+          deliveryProvider: true,
           logoUrl: true,
           coverImageUrl: true,
           operatingHours: true,
@@ -397,7 +406,8 @@ router.post('/', authenticateToken, authorizeRole(['bakery_owner', 'admin']), as
       logoUrl,
       coverImageUrl,
       commercialRegistryUrl,
-      operatingHours
+      operatingHours,
+      deliveryProvider
     } = req.body;
 
     const normalizedAddressLine1 =
@@ -416,6 +426,16 @@ router.post('/', authenticateToken, authorizeRole(['bakery_owner', 'admin']), as
       logoUrl,
       coverImageUrl,
     });
+    const normalizedDeliveryProvider = normalizeDeliveryProvider(
+      deliveryProvider,
+    );
+    if (deliveryProvider !== undefined && normalizedDeliveryProvider == null) {
+      return res.status(400).json({
+        status: 'fail',
+        message:
+          'Invalid deliveryProvider. Expected "bakery" or "third_party".',
+      });
+    }
 
     // Create new bakery
     const bakery = await prisma.bakery.create({
@@ -432,6 +452,7 @@ router.post('/', authenticateToken, authorizeRole(['bakery_owner', 'admin']), as
         ...bakeryAssetPayload,
         commercialRegistryUrl,
         operatingHours,
+        deliveryProvider: normalizedDeliveryProvider || 'third_party',
         status: 'pending_approval',
         ownerId: req.user.id,
         createdBy: req.user.id
@@ -469,7 +490,9 @@ router.put('/:bakeryId', authenticateToken, async (req, res) => {
       email,
       logoUrl,
       coverImageUrl,
-      operatingHours
+      commercialRegistryUrl,
+      operatingHours,
+      deliveryProvider
     } = req.body;
 
     // Find bakery
@@ -495,6 +518,31 @@ router.put('/:bakeryId', authenticateToken, async (req, res) => {
       logoUrl,
       coverImageUrl,
     });
+    const normalizedDeliveryProvider =
+      deliveryProvider === undefined
+        ? undefined
+        : normalizeDeliveryProvider(deliveryProvider);
+    if (deliveryProvider !== undefined && normalizedDeliveryProvider == null) {
+      return res.status(400).json({
+        status: 'fail',
+        message:
+          'Invalid deliveryProvider. Expected "bakery" or "third_party".',
+      });
+    }
+
+    const normalizedCommercialRegistryUrl =
+      commercialRegistryUrl === undefined
+        ? undefined
+        : normalizeWritableAssetUrl(commercialRegistryUrl);
+
+    const ownerResubmittedDocuments = req.user.role !== 'admin' &&
+      bakery.ownerId === req.user.id &&
+      bakery.status === 'rejected' &&
+      (
+        (typeof bakeryAssetPayload.logoUrl === 'string' && bakeryAssetPayload.logoUrl !== bakery.logoUrl) ||
+        (typeof bakeryAssetPayload.coverImageUrl === 'string' && bakeryAssetPayload.coverImageUrl !== bakery.coverImageUrl) ||
+        (typeof normalizedCommercialRegistryUrl === 'string' && normalizedCommercialRegistryUrl !== bakery.commercialRegistryUrl)
+      );
 
     // Update bakery
     const updatedBakery = await prisma.bakery.update({
@@ -509,8 +557,19 @@ router.put('/:bakeryId', authenticateToken, async (req, res) => {
         ...(country !== undefined && { country }),
         ...(phoneNumber !== undefined && { phoneNumber }),
         ...(email !== undefined && { email }),
+        ...(normalizedCommercialRegistryUrl !== undefined && {
+          commercialRegistryUrl: normalizedCommercialRegistryUrl,
+        }),
+        ...(normalizedDeliveryProvider !== undefined && {
+          deliveryProvider: normalizedDeliveryProvider,
+        }),
         ...bakeryAssetPayload,
         ...(operatingHours !== undefined && { operatingHours }),
+        ...(ownerResubmittedDocuments && {
+          status: 'pending_approval',
+          rejectionReason: null,
+          rejectedAt: null,
+        }),
         updatedBy: req.user.id,
         updatedAt: new Date()
       }

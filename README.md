@@ -218,6 +218,213 @@ If you need to modify the database schema:
 
 - If you encounter database connection issues, verify your DATABASE_URL in the .env file
 - For Prisma Client generation errors, try deleting the `node_modules/.prisma` folder and regenerating
+- **Windows Users:**
+  - If you encounter `ECONNRESET` errors during Prisma installation, see [WINDOWS_PRISMA_FIX.md](./WINDOWS_PRISMA_FIX.md) for detailed solutions
+  - If you get `Environment variable not found: DATABASE_URL`, see [WINDOWS_ENV_SETUP.md](./WINDOWS_ENV_SETUP.md) for environment variable setup
+
+## Payments (Stripe + COD, Provider Abstraction)
+
+### Environment Variables
+
+Set these in `.env`:
+
+```bash
+STRIPE_SECRET_KEY=sk_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_SUCCESS_URL=http://localhost:3004/checkout/success
+STRIPE_CANCEL_URL=http://localhost:3004/checkout/cancel
+DEFAULT_CURRENCY=JOD
+ENABLE_NOON_PAYMENTS=false
+ENABLE_ORDER_EMAILS=true
+SMTP_HOST=smtp.your-provider.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your_smtp_username
+SMTP_PASS=your_smtp_password
+SMTP_FROM_EMAIL=no-reply@khubzati.com
+SMTP_FROM_NAME=Khubzati
+```
+
+### Payment Architecture
+
+- `src/services/payments/payment-provider.js`: provider interface
+- `src/services/payments/stripe-payment-provider.js`: Stripe implementation
+- `src/services/payments/noon-payment-provider.js`: Noon placeholder (future fallback)
+- `src/services/payments/payment-service.js`: provider selection + order payment lifecycle
+- `webhook_events` table: webhook idempotency (`provider + event_id` unique)
+
+### Source of Truth
+
+- Frontend redirect pages are **not** trusted for payment confirmation
+- Online card orders become `PAID` only from Stripe webhook events
+- Supported webhook events:
+  - `payment_intent.succeeded`
+  - `payment_intent.payment_failed`
+  - `checkout.session.completed`
+
+### API Endpoints
+
+#### 1) `POST /v1/orders`
+Create order with payment method.
+
+Request:
+```json
+{
+  "bakeryId": "ca532d39-e6b5-4144-bc6a-3ff82ba31a14",
+  "orderType": "delivery",
+  "deliveryAddressId": "a1b2c3d4",
+  "paymentMethod": "ONLINE_CARD",
+  "items": [
+    { "productId": "3c15cead-442f-429f-8935-729bdaf8d476", "quantity": 10 }
+  ]
+}
+```
+
+COD behavior:
+- `paymentStatus = COD_PENDING`
+- order is confirmed immediately
+- Stripe is not called
+
+#### 2) `POST /v1/payments/create-session`
+Create one Stripe Checkout session per order.
+
+Request:
+```json
+{ "orderId": "order_uuid" }
+```
+
+Response:
+```json
+{
+  "status": "success",
+  "data": {
+    "orderId": "order_uuid",
+    "checkoutUrl": "https://checkout.stripe.com/c/pay/cs_test_...",
+    "provider": "stripe",
+    "providerSessionId": "cs_test_...",
+    "providerPaymentId": "pi_...",
+    "amount": 20,
+    "currency": "JOD"
+  }
+}
+```
+
+#### 3) `POST /v1/payments/webhooks/stripe`
+Stripe webhook endpoint with signature verification and idempotency.
+
+#### 4) `POST /v1/orders/:id/mark-cod-collected`
+Admin/vendor action to mark COD received.
+
+#### 5) `GET /v1/orders/:id/payment-status`
+Read current payment status/provider metadata.
+
+#### 6) Daily Recurring Orders (Auto-Renew)
+
+To enable automatic daily renewal, create order with:
+
+```json
+{
+  "repeatMode": "daily",
+  "paymentMethod": "CASH_ON_DELIVERY"
+}
+```
+
+Notes:
+- Daily recurring currently supports COD only.
+- Backend stores a recurring template and generates the same order automatically every 24h.
+- Inventory is revalidated on each renewal; if stock is insufficient, renewal is skipped and logged.
+- Renewal worker is controlled by `ENABLE_RECURRING_ORDER_WORKER=true`.
+
+Management endpoints:
+- `GET /v1/orders/recurring`
+- `PATCH /v1/orders/recurring/:id` with body `{ "isActive": true|false }`
+
+### Flutter Integration Contract
+
+1. Create order:
+   - `paymentMethod = ONLINE_CARD` or `CASH_ON_DELIVERY`
+2. If `ONLINE_CARD`:
+   - call `POST /v1/payments/create-session`
+   - open `checkoutUrl` in browser/webview
+   - show pending state until backend webhook updates order to `PAID` or `FAILED`
+3. If `CASH_ON_DELIVERY`:
+   - no Stripe call
+   - order is created with `COD_PENDING`
+
+### Security Notes
+
+- Never mark online orders as paid from frontend redirect callback
+- Backend validates order ownership and amount before creating checkout session
+- Webhook signature is verified using `STRIPE_WEBHOOK_SECRET`
+- Duplicate webhook events are skipped via `webhook_events` unique constraint
+
+### Order Confirmation Emails
+
+- COD orders: confirmation email is sent immediately after order creation
+- Online card orders: confirmation email is sent only after Stripe webhook confirms payment (`PAID`)
+- Email sending is backend-driven and optional. If SMTP is not configured, order flow still succeeds and logs the email error.
+
+## Production Baseline Checklist
+
+### 1) Required environment variables in production
+
+- `NODE_ENV=production`
+- `DATABASE_URL`
+- `DIRECT_URL`
+- `JWT_SECRET`
+- `CORS_ORIGINS` (comma-separated HTTPS origins, for example `https://khubzati.com,https://admin.khubzati.com`)
+
+If `PAYMENT_MODE=live`, these are also required:
+
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+
+Notes:
+
+- `ENABLE_STUB_RESPONSES=true` is blocked in production startup.
+- Missing required vars fail fast at boot with a clear error.
+
+### 2) CORS policy
+
+- Production only allows origins listed in `CORS_ORIGINS`.
+- Unknown browser origins are rejected.
+- Requests without `Origin` header (for example native mobile/server-to-server) are still allowed.
+
+### 3) Migrations and ORM direction
+
+- Runtime API uses Prisma (`@prisma/client`) for active routes and services.
+- Driver operations and push token persistence are part of the active Prisma domain (`DriverProfile`, `DeliveryAssignment`, `DeviceToken`).
+- Production migration command is:
+  - `npm run db:migrate`
+- Local schema workflow:
+  - `npm run db:migrate:dev`
+  - `npm run db:generate`
+- Legacy Sequelize files/scripts are kept temporarily for historical compatibility only:
+  - `npm run db:legacy:sequelize:migrate`
+  - `npm run db:legacy:sequelize:undo`
+
+### 4) Upload storage
+
+- Current default is `UPLOAD_STORAGE_DRIVER=local` and files are stored under `uploads/`.
+- Max upload size can be configured with `UPLOAD_MAX_FILE_SIZE_BYTES` (default 10MB).
+- Local uploads are git-ignored.
+- File type signature checks, file size limits, and safe generated filenames are enforced in the upload route.
+- `UPLOAD_STORAGE_DRIVER` is prepared as a config seam; non-local drivers are currently warned and fallback to local.
+- TODO: plug S3/R2/GCS adapter + signed URLs for production object storage.
+
+### 5) Health and readiness
+
+- `GET /health`: liveness check
+- `GET /ready`: readiness check that includes a database connectivity probe
+- `x-request-id` is returned on API responses to help correlate client errors with backend logs.
+
+### 5) CI commands (backend repo)
+
+- `npm ci`
+- `npm run lint`
+- `npm test`
+- `npm run build`
+- smoke start check via `npm start`
 
 ## License
 

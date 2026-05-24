@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
-import { PrismaClient } from '@prisma/client';
+import dotenv from 'dotenv';
+const prisma = require('../../../../lib/prisma');
 
-const prisma = new PrismaClient();
+// Load environment variables
+dotenv.config({ path: '.env' });
 
 export async function POST(request: Request) {
     try {

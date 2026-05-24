@@ -7,10 +7,9 @@
  */
 
 require('dotenv').config();
-const { PrismaClient } = require('../generated/prisma');
+const prisma = require('../lib/prisma');
 const bcrypt = require('bcryptjs');
 
-const prisma = new PrismaClient();
 
 async function createAdminUser() {
     try {
@@ -18,6 +17,7 @@ async function createAdminUser() {
         const adminPassword = process.env.ADMIN_PASSWORD || 'Admin@1234';
         const adminUsername = process.env.ADMIN_USERNAME || 'admin';
         const adminFullName = process.env.ADMIN_FULL_NAME || 'Administrator';
+        const shouldResetPassword = String(process.env.ADMIN_RESET_PASSWORD || 'false').toLowerCase() === 'true';
 
         console.log('Creating admin user...');
         console.log(`Email: ${adminEmail}`);
@@ -39,13 +39,44 @@ async function createAdminUser() {
             console.log(`Email: ${existingAdmin.email}`);
             console.log(`Role: ${existingAdmin.role}`);
 
+            const updateData = {};
+            let hasUpdates = false;
+
             if (existingAdmin.role !== 'admin') {
-                console.log('Updating existing user to admin role...');
+                updateData.role = 'admin';
+                hasUpdates = true;
+            }
+
+            if (existingAdmin.email !== adminEmail) {
+                updateData.email = adminEmail;
+                hasUpdates = true;
+            }
+
+            if (existingAdmin.username !== adminUsername) {
+                updateData.username = adminUsername;
+                hasUpdates = true;
+            }
+
+            if (existingAdmin.fullName !== adminFullName) {
+                updateData.fullName = adminFullName;
+                hasUpdates = true;
+            }
+
+            if (shouldResetPassword) {
+                console.log('ADMIN_RESET_PASSWORD=true detected, resetting admin password...');
+                const salt = await bcrypt.genSalt(10);
+                updateData.password = await bcrypt.hash(adminPassword, salt);
+                hasUpdates = true;
+            }
+
+            if (hasUpdates) {
                 await prisma.user.update({
                     where: { id: existingAdmin.id },
-                    data: { role: 'admin' }
+                    data: updateData,
                 });
-                console.log('User role updated to admin!');
+                console.log('✅ Existing admin user updated.');
+            } else {
+                console.log('No admin updates required.');
             }
 
             await prisma.$disconnect();
@@ -87,4 +118,3 @@ async function createAdminUser() {
 }
 
 createAdminUser();
-

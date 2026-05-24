@@ -15,12 +15,12 @@ model User {
   email             String         @unique
   password          String
   fullName          String?        @map("full_name")
-  phoneNumber       String         @unique
+  phoneNumber       String         @unique @map("phone_number")
   role              UserRole       @default(customer)
   isVerified        Boolean        @default(false) @map("is_verified")
   profilePictureUrl String?        @map("profile_picture_url")
   otp               String?
-  otpExpiry         DateTime?
+  otpExpiry         DateTime?      @map("otp_expiry")
   createdAt         DateTime       @default(now()) @map("created_at")
   createdBy         String?        @map("created_by")
   updatedAt         DateTime?      @updatedAt @map("updated_at")
@@ -33,8 +33,37 @@ model User {
   orders            Order[]
   notifications     Notification[]
   carts             Cart[]
+  favorites         Favorite[]
+  driverProfile     DriverProfile?
+  deviceTokens      DeviceToken[]
+  refundRequests    RefundRequest[]      @relation("RefundRequester")
+  approvedRefunds   RefundRequest[]      @relation("RefundApprover")
+  disputeCases      DisputeCase[]        @relation("DisputeCustomer")
+  disputeMessages   DisputeMessage[]
+  resolvedDisputes  DisputeCase[]        @relation("DisputeResolver")
+  payoutRequests    PayoutRequest[]      @relation("PayoutRequester")
+  reviewedPayouts   PayoutRequest[]      @relation("PayoutReviewer")
+  auditLogs         AuditLog[]
+  recurringOrders   RecurringOrder[]
 
   @@map("users")
+}
+
+model Favorite {
+  id         String             @id @default(uuid())
+  userId     String             @map("user_id")
+  targetType FavoriteTargetType @map("target_type")
+  targetId   String             @map("target_id")
+  createdAt  DateTime           @default(now()) @map("created_at")
+  createdBy  String?            @map("created_by")
+  updatedAt  DateTime?          @updatedAt @map("updated_at")
+  updatedBy  String?            @map("updated_by")
+  deletedAt  DateTime?          @map("deleted_at")
+  user       User               @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([userId, targetType, targetId])
+  @@index([userId, targetType])
+  @@map("favorites")
 }
 
 model Address {
@@ -56,6 +85,7 @@ model Address {
   deletedAt    DateTime?   @map("deleted_at")
   user         User        @relation(fields: [userId], references: [id])
   orders       Order[]
+  recurringOrders RecurringOrder[]
 
   @@map("addresses")
 }
@@ -79,34 +109,60 @@ model Category {
   @@map("categories")
 }
 
+model BreadTypeCatalog {
+  id          String    @id @default(uuid())
+  key         String    @unique
+  englishName String    @map("english_name")
+  arabicName  String?   @map("arabic_name")
+  imageUrl    String?   @map("image_url")
+  imageSource String?   @map("image_source")
+  imageCredit String?   @map("image_credit")
+  description String?
+  tags        Json?
+  sortOrder   Int       @default(0) @map("sort_order")
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  createdBy   String?   @map("created_by")
+  updatedAt   DateTime? @updatedAt @map("updated_at")
+  updatedBy   String?   @map("updated_by")
+  deletedAt   DateTime? @map("deleted_at")
+
+  @@map("bread_type_catalog")
+}
+
 model Bakery {
-  id             String       @id @default(uuid())
-  name           String
-  description    String?
-  addressLine1   String       @map("address_line1")
-  addressLine2   String?      @map("address_line2")
-  city           String
-  postalCode     String       @map("postal_code")
-  country        String       @default("Saudi Arabia")
-  phoneNumber    String       @map("phone_number")
-  email          String?
-  logoUrl              String?      @map("logo_url")
-  coverImageUrl        String?      @map("cover_image_url")
-  commercialRegistryUrl String?     @map("commercial_registry_url")
-  operatingHours       Json?        @map("operating_hours")
-  status               BakeryStatus @default(pending_approval)
-  ownerId        String       @map("owner_id")
-  averageRating  Float        @default(0) @map("average_rating")
-  reviewCount    Int          @default(0) @map("review_count")
-  createdAt      DateTime     @default(now()) @map("created_at")
-  createdBy      String?      @map("created_by")
-  updatedAt      DateTime?    @updatedAt @map("updated_at")
-  updatedBy      String?      @map("updated_by")
-  deletedAt      DateTime?    @map("deleted_at")
-  owner          User         @relation(fields: [ownerId], references: [id])
-  products       Product[]
-  reviews        Review[]
-  orders         Order[]
+  id                    String       @id @default(uuid())
+  name                  String
+  description           String?
+  addressLine1          String       @map("address_line1")
+  addressLine2          String?      @map("address_line2")
+  city                  String
+  postalCode            String       @map("postal_code")
+  country               String       @default("Saudi Arabia")
+  currency              String       @default("jod")
+  phoneNumber           String       @map("phone_number")
+  email                 String?
+  logoUrl               String?      @map("logo_url")
+  coverImageUrl         String?      @map("cover_image_url")
+  commercialRegistryUrl String?      @map("commercial_registry_url")
+  deliveryProvider      DeliveryProvider @default(third_party) @map("delivery_provider")
+  operatingHours        Json?        @map("operating_hours")
+  status                BakeryStatus @default(pending_approval)
+  rejectionReason       String?      @map("rejection_reason")
+  rejectedAt            DateTime?    @map("rejected_at")
+  ownerId               String       @map("owner_id")
+  averageRating         Float        @default(0) @map("average_rating")
+  reviewCount           Int          @default(0) @map("review_count")
+  createdAt             DateTime     @default(now()) @map("created_at")
+  createdBy             String?      @map("created_by")
+  updatedAt             DateTime?    @updatedAt @map("updated_at")
+  updatedBy             String?      @map("updated_by")
+  deletedAt             DateTime?    @map("deleted_at")
+  owner                 User         @relation(fields: [ownerId], references: [id])
+  products              Product[]
+  reviews               Review[]
+  orders                Order[]
+  recurringOrders       RecurringOrder[]
 
   @@map("bakeries")
 }
@@ -121,12 +177,15 @@ model Restaurant {
   city           String
   postalCode     String           @map("postal_code")
   country        String           @default("Saudi Arabia")
+  currency       String           @default("jod")
   phoneNumber    String           @map("phone_number")
   email          String?
   logoUrl        String?          @map("logo_url")
   coverImageUrl  String?          @map("cover_image_url")
   operatingHours Json?            @map("operating_hours")
   status         RestaurantStatus @default(pending_approval)
+  rejectionReason String?         @map("rejection_reason")
+  rejectedAt      DateTime?       @map("rejected_at")
   ownerId        String           @map("owner_id")
   averageRating  Float            @default(0) @map("average_rating")
   reviewCount    Int              @default(0) @map("review_count")
@@ -139,6 +198,7 @@ model Restaurant {
   products       Product[]
   reviews        Review[]
   orders         Order[]
+  recurringOrders RecurringOrder[]
 
   @@map("restaurants")
 }
@@ -209,32 +269,117 @@ model CartItem {
 }
 
 model Order {
-  id                    String        @id @default(uuid())
-  userId                String        @map("user_id")
-  bakeryId              String?       @map("bakery_id")
-  restaurantId          String?       @map("restaurant_id")
-  orderNumber           String        @unique @map("order_number")
-  status                OrderStatus   @default(pending)
-  orderType             OrderType     @map("order_type")
-  deliveryAddressId     String?       @map("delivery_address_id")
-  totalAmount           Decimal       @map("total_amount") @db.Decimal(10, 2)
-  paymentMethod         PaymentMethod @map("payment_method")
-  paymentStatus         PaymentStatus @default(pending) @map("payment_status")
-  specialInstructions   String?       @map("special_instructions")
-  estimatedDeliveryTime DateTime?     @map("estimated_delivery_time")
-  actualDeliveryTime    DateTime?     @map("actual_delivery_time")
-  createdAt             DateTime      @default(now()) @map("created_at")
-  createdBy             String?       @map("created_by")
-  updatedAt             DateTime?     @updatedAt @map("updated_at")
-  updatedBy             String?       @map("updated_by")
-  deletedAt             DateTime?     @map("deleted_at")
-  user                  User          @relation(fields: [userId], references: [id])
-  bakery                Bakery?       @relation(fields: [bakeryId], references: [id])
-  restaurant            Restaurant?   @relation(fields: [restaurantId], references: [id])
-  deliveryAddress       Address?      @relation(fields: [deliveryAddressId], references: [id])
+  id                    String           @id @default(uuid())
+  userId                String           @map("user_id")
+  bakeryId              String?          @map("bakery_id")
+  restaurantId          String?          @map("restaurant_id")
+  orderNumber           String           @unique @map("order_number")
+  status                OrderStatus      @default(pending)
+  orderType             OrderType        @map("order_type")
+  deliveryAddressId     String?          @map("delivery_address_id")
+  totalAmount           Decimal          @map("total_amount") @db.Decimal(10, 2)
+  paymentMethod         PaymentMethod    @map("payment_method")
+  paymentStatus         PaymentStatus    @default(pending) @map("payment_status")
+  paymentProvider       PaymentProvider? @map("payment_provider")
+  providerPaymentId     String?          @map("provider_payment_id")
+  providerSessionId     String?          @map("provider_session_id")
+  paymentAmount         Decimal?         @map("payment_amount") @db.Decimal(10, 2)
+  currency              String           @default("JOD")
+  paidAt                DateTime?        @map("paid_at")
+  codCollectedAt        DateTime?        @map("cod_collected_at")
+  codCollectedBy        String?          @map("cod_collected_by")
+  paymentIntentId       String?          @map("payment_intent_id")
+  paymentErrorMessage   String?          @map("payment_error_message")
+  specialInstructions   String?          @map("special_instructions")
+  estimatedDeliveryTime DateTime?        @map("estimated_delivery_time")
+  actualDeliveryTime    DateTime?        @map("actual_delivery_time")
+  createdAt             DateTime         @default(now()) @map("created_at")
+  createdBy             String?          @map("created_by")
+  updatedAt             DateTime?        @updatedAt @map("updated_at")
+  updatedBy             String?          @map("updated_by")
+  deletedAt             DateTime?        @map("deleted_at")
+  user                  User             @relation(fields: [userId], references: [id])
+  bakery                Bakery?          @relation(fields: [bakeryId], references: [id])
+  restaurant            Restaurant?      @relation(fields: [restaurantId], references: [id])
+  deliveryAddress       Address?         @relation(fields: [deliveryAddressId], references: [id])
   orderItems            OrderItem[]
+  webhookEvents         WebhookEvent[]
+  deliveryAssignment    DeliveryAssignment?
+  financialRecord       OrderFinancialRecord?
+  refundRequests        RefundRequest[]
+  disputeCases          DisputeCase[]
+  transactions          FinancialTransaction[]
 
+  @@index([status, createdAt])
+  @@index([paymentStatus, createdAt])
   @@map("orders")
+}
+
+model DriverProfile {
+  id           String               @id @default(uuid())
+  userId       String               @unique @map("user_id")
+  status       DriverStatus         @default(offline)
+  vehicleType  String?              @map("vehicle_type")
+  licensePlate String?              @map("license_plate")
+  latitude     Decimal?             @db.Decimal(10, 8)
+  longitude    Decimal?             @db.Decimal(11, 8)
+  createdAt    DateTime             @default(now()) @map("created_at")
+  updatedAt    DateTime?            @updatedAt @map("updated_at")
+  user         User                 @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  assignments  DeliveryAssignment[]
+
+  @@map("driver_profiles")
+}
+
+model DeliveryAssignment {
+  id          String         @id @default(uuid())
+  orderId     String         @unique @map("order_id")
+  driverId    String         @map("driver_id")
+  status      String         @default("assigned")
+  pickedUpAt  DateTime?      @map("picked_up_at")
+  deliveredAt DateTime?      @map("delivered_at")
+  rejectedAt  DateTime?      @map("rejected_at")
+  failedAt    DateTime?      @map("failed_at")
+  failureReason String?      @map("failure_reason")
+  deliveryNote String?       @map("delivery_note")
+  proofImageUrl String?      @map("proof_image_url")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime?      @updatedAt @map("updated_at")
+  order       Order          @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  driver      DriverProfile  @relation(fields: [driverId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([driverId])
+  @@map("delivery_assignments")
+}
+
+model DeviceToken {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  token     String    @unique
+  platform  String?
+  lastUsed  DateTime  @default(now()) @map("last_used")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([userId])
+  @@map("device_tokens")
+}
+
+model WebhookEvent {
+  id          String          @id @default(uuid())
+  provider    PaymentProvider
+  eventId     String          @map("event_id")
+  eventType   String          @map("event_type")
+  payload     Json
+  orderId     String?         @map("order_id")
+  processedAt DateTime        @default(now()) @map("processed_at")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  order       Order?          @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([provider, eventId])
+  @@index([orderId])
+  @@map("webhook_events")
 }
 
 model OrderItem {
@@ -306,11 +451,653 @@ model Todo {
   @@map("todos")
 }
 
+model CommissionConfig {
+  id         String           @id @default(uuid())
+  scope      CommissionScope
+  vendorType VendorType?      @map("vendor_type")
+  vendorId   String?          @map("vendor_id")
+  rateBps    Int              @map("rate_bps")
+  isActive   Boolean          @default(true) @map("is_active")
+  notes      String?
+  createdAt  DateTime         @default(now()) @map("created_at")
+  createdBy  String?          @map("created_by")
+  updatedAt  DateTime?        @updatedAt @map("updated_at")
+  updatedBy  String?          @map("updated_by")
+
+  @@index([scope, isActive])
+  @@index([vendorType, vendorId, isActive])
+  @@map("commission_configs")
+}
+
+model OrderFinancialRecord {
+  id                String    @id @default(uuid())
+  orderId           String    @unique @map("order_id")
+  grossAmount       Decimal   @map("gross_amount") @db.Decimal(10, 2)
+  commissionRateBps Int       @map("commission_rate_bps")
+  commissionAmount  Decimal   @map("commission_amount") @db.Decimal(10, 2)
+  vendorNetAmount   Decimal   @map("vendor_net_amount") @db.Decimal(10, 2)
+  refundedAmount    Decimal   @default(0) @map("refunded_amount") @db.Decimal(10, 2)
+  payoutAmount      Decimal   @default(0) @map("payout_amount") @db.Decimal(10, 2)
+  netPlatformAmount Decimal   @default(0) @map("net_platform_amount") @db.Decimal(10, 2)
+  snapshot          Json?
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime? @updatedAt @map("updated_at")
+  order             Order     @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([createdAt])
+  @@map("order_financial_records")
+}
+
+model RefundRequest {
+  id               String       @id @default(uuid())
+  orderId          String       @map("order_id")
+  requesterUserId  String       @map("requester_user_id")
+  requesterRole    String       @map("requester_role")
+  amount           Decimal      @db.Decimal(10, 2)
+  reason           String
+  status           RefundStatus @default(pending)
+  adminNotes       String?      @map("admin_notes")
+  providerRefundId String?      @map("provider_refund_id")
+  approvedByUserId String?      @map("approved_by_user_id")
+  approvedAt       DateTime?    @map("approved_at")
+  processedAt      DateTime?    @map("processed_at")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime?    @updatedAt @map("updated_at")
+  order            Order        @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  requester        User         @relation("RefundRequester", fields: [requesterUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approver         User?        @relation("RefundApprover", fields: [approvedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  transactions     FinancialTransaction[]
+
+  @@index([orderId, status])
+  @@index([requesterUserId, status])
+  @@map("refund_requests")
+}
+
+model DisputeCase {
+  id               String        @id @default(uuid())
+  orderId          String        @map("order_id")
+  customerId       String        @map("customer_id")
+  vendorType       VendorType    @map("vendor_type")
+  vendorId         String        @map("vendor_id")
+  subject          String
+  description      String
+  evidenceUrl      String?       @map("evidence_url")
+  status           DisputeStatus @default(open)
+  resolutionNote   String?       @map("resolution_note")
+  resolvedByUserId String?       @map("resolved_by_user_id")
+  resolvedAt       DateTime?     @map("resolved_at")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime?     @updatedAt @map("updated_at")
+  order            Order         @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  customer         User          @relation("DisputeCustomer", fields: [customerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  resolver         User?         @relation("DisputeResolver", fields: [resolvedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  messages         DisputeMessage[]
+
+  @@index([orderId, status])
+  @@index([vendorType, vendorId, status])
+  @@map("dispute_cases")
+}
+
+model DisputeMessage {
+  id            String    @id @default(uuid())
+  disputeId     String    @map("dispute_id")
+  senderUserId  String    @map("sender_user_id")
+  senderRole    String    @map("sender_role")
+  message       String
+  attachmentUrl String?   @map("attachment_url")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  dispute       DisputeCase @relation(fields: [disputeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  sender        User      @relation(fields: [senderUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([disputeId, createdAt])
+  @@map("dispute_messages")
+}
+
+model PayoutRequest {
+  id                String      @id @default(uuid())
+  vendorType        VendorType  @map("vendor_type")
+  vendorId          String      @map("vendor_id")
+  requesterUserId   String?     @map("requester_user_id")
+  amount            Decimal     @db.Decimal(10, 2)
+  currency          String      @default("JOD")
+  status            PayoutStatus @default(requested)
+  reason            String?
+  reviewedByUserId  String?     @map("reviewed_by_user_id")
+  reviewedAt        DateTime?   @map("reviewed_at")
+  paidAt            DateTime?   @map("paid_at")
+  transactionRef    String?     @map("transaction_ref")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime?   @updatedAt @map("updated_at")
+  requester         User?       @relation("PayoutRequester", fields: [requesterUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  reviewer          User?       @relation("PayoutReviewer", fields: [reviewedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  transactions      FinancialTransaction[]
+
+  @@index([vendorType, vendorId, status])
+  @@index([status, createdAt])
+  @@map("payout_requests")
+}
+
+model FinancialTransaction {
+  id                String                    @id @default(uuid())
+  orderId           String?                   @map("order_id")
+  refundRequestId   String?                   @map("refund_request_id")
+  payoutRequestId   String?                   @map("payout_request_id")
+  transactionType   FinancialTransactionType  @map("transaction_type")
+  status            String
+  amount            Decimal                   @db.Decimal(10, 2)
+  currency          String                    @default("JOD")
+  provider          String?
+  providerReference String?                   @map("provider_reference")
+  metadata          Json?
+  createdAt         DateTime                  @default(now()) @map("created_at")
+  order             Order?                    @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  refundRequest     RefundRequest?            @relation(fields: [refundRequestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  payoutRequest     PayoutRequest?            @relation(fields: [payoutRequestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([transactionType, status, createdAt])
+  @@index([orderId])
+  @@map("financial_transactions")
+}
+
+model RecurringOrder {
+  id                  String                @id @default(uuid())
+  signature           String                @unique
+  userId              String                @map("user_id")
+  bakeryId            String?               @map("bakery_id")
+  restaurantId        String?               @map("restaurant_id")
+  deliveryAddressId   String?               @map("delivery_address_id")
+  sourceOrderId       String?               @map("source_order_id")
+  frequency           RecurringOrderFrequency
+  orderType           OrderType             @default(delivery) @map("order_type")
+  paymentMethod       PaymentMethod         @map("payment_method")
+  paymentProvider     PaymentProvider?      @map("payment_provider")
+  specialInstructions String?               @map("special_instructions")
+  itemsJson           Json                  @map("items_json")
+  isActive            Boolean               @default(true) @map("is_active")
+  nextRunAt           DateTime              @map("next_run_at")
+  lastRunAt           DateTime?             @map("last_run_at")
+  lastOrderId         String?               @map("last_order_id")
+  lastError           String?               @map("last_error")
+  createdAt           DateTime              @default(now()) @map("created_at")
+  updatedAt           DateTime?             @updatedAt @map("updated_at")
+  user                User                  @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  bakery              Bakery?               @relation(fields: [bakeryId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  restaurant          Restaurant?           @relation(fields: [restaurantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  deliveryAddress     Address?              @relation(fields: [deliveryAddressId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([isActive, nextRunAt])
+  @@index([userId, isActive])
+  @@index([bakeryId, isActive])
+  @@index([restaurantId, isActive])
+  @@map("recurring_orders")
+}
+
+model NotificationJob {
+  id            String                @id @default(uuid())
+  userId        String?               @map("user_id")
+  eventType     String                @map("event_type")
+  channel       String
+  title         String
+  message       String
+  payload       Json?
+  status        NotificationJobStatus @default(pending)
+  attempts      Int                   @default(0)
+  maxAttempts   Int                   @default(3) @map("max_attempts")
+  nextAttemptAt DateTime              @default(now()) @map("next_attempt_at")
+  lockedAt      DateTime?             @map("locked_at")
+  lockedBy      String?               @map("locked_by")
+  sentAt        DateTime?             @map("sent_at")
+  lastError     String?               @map("last_error")
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime?             @updatedAt @map("updated_at")
+
+  @@index([status, nextAttemptAt])
+  @@index([userId, createdAt])
+  @@map("notification_jobs")
+}
+
+model UploadAuditLog {
+  id            String   @id @default(uuid())
+  userId        String?  @map("user_id")
+  ownerType     String?  @map("owner_type")
+  ownerId       String?  @map("owner_id")
+  fileName      String?  @map("file_name")
+  fileUrl       String   @map("file_url")
+  mimeType      String?  @map("mime_type")
+  fileSize      Int?     @map("file_size")
+  sourceRoute   String?  @map("source_route")
+  requestId     String?  @map("request_id")
+  uploadedAt    DateTime @default(now()) @map("uploaded_at")
+
+  @@index([userId, uploadedAt])
+  @@index([ownerType, ownerId, uploadedAt])
+  @@map("upload_audit_logs")
+}
+
+model UserSecurityEvent {
+  id           String   @id @default(uuid())
+  userId       String?  @map("user_id")
+  eventType    String   @map("event_type")
+  status       String?  @default("recorded")
+  identifier   String?  @map("identifier")
+  ipAddress    String?  @map("ip_address")
+  userAgent    String?  @map("user_agent")
+  requestId    String?  @map("request_id")
+  metadata     Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@index([eventType, createdAt])
+  @@index([identifier, createdAt])
+  @@map("user_security_events")
+}
+
+model InventoryMovement {
+  id             String   @id @default(uuid())
+  productId      String   @map("product_id")
+  orderId        String?  @map("order_id")
+  movementType   String   @map("movement_type")
+  quantityBefore Int      @map("quantity_before")
+  quantityDelta  Int      @map("quantity_delta")
+  quantityAfter  Int      @map("quantity_after")
+  reason         String?
+  actorUserId    String?  @map("actor_user_id")
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([productId, createdAt])
+  @@index([orderId, createdAt])
+  @@index([movementType, createdAt])
+  @@map("inventory_movements")
+}
+
+model OrderCancellationReason {
+  id               String   @id @default(uuid())
+  orderId          String   @unique @map("order_id")
+  reasonCode       String?  @map("reason_code")
+  reasonText       String?  @map("reason_text")
+  cancelledByUserId String? @map("cancelled_by_user_id")
+  cancelledByRole  String?  @map("cancelled_by_role")
+  metadata         Json?
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([cancelledByUserId, createdAt])
+  @@map("order_cancellation_reasons")
+}
+
+model OrderIdempotencyKey {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  key         String
+  requestHash String    @map("request_hash")
+  orderId     String?   @map("order_id")
+  processing  Boolean   @default(true)
+  lastError   String?   @map("last_error")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime? @updatedAt @map("updated_at")
+
+  @@unique([userId, key])
+  @@index([orderId])
+  @@index([processing, createdAt])
+  @@map("order_idempotency_keys")
+}
+
+model ApiContractVersion {
+  id          String    @id @default(uuid())
+  clientName  String    @map("client_name")
+  version     String
+  minVersion  String?   @map("min_version")
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime? @updatedAt @map("updated_at")
+  metadata    Json?
+
+  @@unique([clientName, version])
+  @@index([clientName, isActive])
+  @@map("api_contract_versions")
+}
+
+model ClientErrorEvent {
+  id             String   @id @default(uuid())
+  clientName     String?  @map("client_name")
+  appVersion     String?  @map("app_version")
+  endpoint       String?
+  httpStatus     Int?     @map("http_status")
+  errorCode      String?  @map("error_code")
+  errorMessage   String?  @map("error_message")
+  payloadSummary String?  @map("payload_summary")
+  userId         String?  @map("user_id")
+  requestId      String?  @map("request_id")
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([clientName, createdAt])
+  @@index([endpoint, httpStatus, createdAt])
+  @@index([userId, createdAt])
+  @@map("client_error_events")
+}
+
+model DeliverySlot {
+  id             String    @id @default(uuid())
+  city           String
+  zoneCode       String?   @map("zone_code")
+  startsAt       DateTime  @map("starts_at")
+  endsAt         DateTime  @map("ends_at")
+  capacity       Int       @default(0)
+  reservedCount  Int       @default(0) @map("reserved_count")
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime? @updatedAt @map("updated_at")
+
+  @@index([city, startsAt, isActive])
+  @@index([zoneCode, startsAt])
+  @@map("delivery_slots")
+}
+
+model RouteZone {
+  id          String    @id @default(uuid())
+  city        String
+  code        String
+  name        String
+  polygon     Json?
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime? @updatedAt @map("updated_at")
+
+  @@unique([city, code])
+  @@index([city, isActive])
+  @@map("route_zones")
+}
+
+model DriverShift {
+  id              String    @id @default(uuid())
+  driverUserId    String    @map("driver_user_id")
+  city            String
+  zoneCode        String?   @map("zone_code")
+  startsAt        DateTime  @map("starts_at")
+  endsAt          DateTime  @map("ends_at")
+  status          String    @default("scheduled")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime? @updatedAt @map("updated_at")
+
+  @@index([driverUserId, startsAt])
+  @@index([city, zoneCode, startsAt])
+  @@map("driver_shifts")
+}
+
+model DispatchJob {
+  id               String    @id @default(uuid())
+  orderId          String    @map("order_id")
+  city             String?
+  zoneCode         String?   @map("zone_code")
+  status           String    @default("pending")
+  priority         Int       @default(0)
+  assignedDriverId String?   @map("assigned_driver_id")
+  lockedAt         DateTime? @map("locked_at")
+  lockedBy         String?   @map("locked_by")
+  attempts         Int       @default(0)
+  nextAttemptAt    DateTime  @default(now()) @map("next_attempt_at")
+  slaDueAt         DateTime? @map("sla_due_at")
+  assignedAt       DateTime? @map("assigned_at")
+  completedAt      DateTime? @map("completed_at")
+  lastError        String?   @map("last_error")
+  metadata         Json?
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime? @updatedAt @map("updated_at")
+
+  @@unique([orderId])
+  @@index([status, nextAttemptAt])
+  @@index([city, zoneCode, status])
+  @@map("dispatch_jobs")
+}
+
+model SettlementBatch {
+  id                String    @id @default(uuid())
+  batchNumber       String    @unique @map("batch_number")
+  status            String    @default("draft")
+  periodStart       DateTime  @map("period_start")
+  periodEnd         DateTime  @map("period_end")
+  totalVendors      Int       @default(0) @map("total_vendors")
+  totalAmount       Decimal   @default(0) @map("total_amount") @db.Decimal(14, 2)
+  currency          String    @default("JOD")
+  createdByUserId   String?   @map("created_by_user_id")
+  approvedByUserId  String?   @map("approved_by_user_id")
+  processedAt       DateTime? @map("processed_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime? @updatedAt @map("updated_at")
+  metadata          Json?
+
+  @@index([status, createdAt])
+  @@map("settlement_batches")
+}
+
+model VendorLedgerEntry {
+  id                String    @id @default(uuid())
+  vendorType        String    @map("vendor_type")
+  vendorId          String    @map("vendor_id")
+  orderId           String?   @map("order_id")
+  payoutRequestId   String?   @map("payout_request_id")
+  settlementBatchId String?   @map("settlement_batch_id")
+  entryType         String    @map("entry_type")
+  amount            Decimal   @map("amount") @db.Decimal(14, 2)
+  currency          String    @default("JOD")
+  balanceAfter      Decimal?  @map("balance_after") @db.Decimal(14, 2)
+  description       String?
+  createdAt         DateTime  @default(now()) @map("created_at")
+  metadata          Json?
+
+  @@index([vendorType, vendorId, createdAt])
+  @@index([orderId])
+  @@index([payoutRequestId])
+  @@index([settlementBatchId])
+  @@map("vendor_ledger_entries")
+}
+
+model PayoutAccount {
+  id                String    @id @default(uuid())
+  vendorType        String    @map("vendor_type")
+  vendorId          String    @map("vendor_id")
+  accountHolderName String?   @map("account_holder_name")
+  bankName          String?   @map("bank_name")
+  iban              String?   @map("iban")
+  accountNumberLast4 String?  @map("account_number_last4")
+  provider          String?   @map("provider")
+  externalAccountId String?   @map("external_account_id")
+  isPrimary         Boolean   @default(false) @map("is_primary")
+  isVerified        Boolean   @default(false) @map("is_verified")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime? @updatedAt @map("updated_at")
+  metadata          Json?
+
+  @@index([vendorType, vendorId, isPrimary])
+  @@map("payout_accounts")
+}
+
+model KpiDailyFact {
+  id                   String    @id @default(uuid())
+  metricDate           DateTime  @map("metric_date") @db.Date
+  city                 String?
+  fillRate             Decimal?  @map("fill_rate") @db.Decimal(7, 4)
+  stockoutRate         Decimal?  @map("stockout_rate") @db.Decimal(7, 4)
+  assignmentLatencySec Int?      @map("assignment_latency_sec")
+  onTimeDeliveryRate   Decimal?  @map("on_time_delivery_rate") @db.Decimal(7, 4)
+  refundRatio          Decimal?  @map("refund_ratio") @db.Decimal(7, 4)
+  payoutAgingHours     Int?      @map("payout_aging_hours")
+  disputeAgingHours    Int?      @map("dispute_aging_hours")
+  cancellationRate     Decimal?  @map("cancellation_rate") @db.Decimal(7, 4)
+  ordersCount          Int?      @map("orders_count")
+  disputesOpenCount    Int?      @map("disputes_open_count")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime? @updatedAt @map("updated_at")
+  metadata             Json?
+
+  @@unique([metricDate, city])
+  @@index([metricDate])
+  @@map("kpi_daily_fact")
+}
+
+model NotificationDeadLetter {
+  id            String   @id @default(uuid())
+  jobId         String   @map("job_id")
+  userId        String?  @map("user_id")
+  eventType     String   @map("event_type")
+  channel       String
+  title         String
+  message       String
+  payload       Json?
+  attempts      Int      @default(0)
+  maxAttempts   Int      @default(0) @map("max_attempts")
+  finalError    String?  @map("final_error")
+  failedAt      DateTime @default(now()) @map("failed_at")
+  metadata      Json?
+
+  @@index([failedAt])
+  @@index([eventType, failedAt])
+  @@map("notification_dead_letters")
+}
+
+model KpiAggregationRun {
+  id             String   @id @default(uuid())
+  runKey         String   @unique @map("run_key")
+  metricDateFrom DateTime @map("metric_date_from") @db.Date
+  metricDateTo   DateTime @map("metric_date_to") @db.Date
+  timezone       String
+  status         String   @default("running")
+  recordsUpserted Int     @default(0) @map("records_upserted")
+  startedAt      DateTime @default(now()) @map("started_at")
+  completedAt    DateTime? @map("completed_at")
+  errorMessage   String?  @map("error_message")
+  metadata       Json?
+
+  @@index([status, startedAt])
+  @@index([metricDateFrom, metricDateTo])
+  @@map("kpi_aggregation_runs")
+}
+
+model SlaAlertRule {
+  id               String    @id @default(uuid())
+  alertType        String    @unique @map("alert_type")
+  isEnabled        Boolean   @default(true) @map("is_enabled")
+  thresholdNumeric Decimal?  @map("threshold_numeric") @db.Decimal(14, 4)
+  thresholdCount   Int?      @map("threshold_count")
+  thresholdSeconds Int?      @map("threshold_seconds")
+  cooldownMinutes  Int       @default(60) @map("cooldown_minutes")
+  metadata         Json?
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime? @updatedAt @map("updated_at")
+
+  @@index([isEnabled])
+  @@map("sla_alert_rules")
+}
+
+model SlaAlertEvent {
+  id              String    @id @default(uuid())
+  alertType       String    @map("alert_type")
+  scopeType       String    @default("global") @map("scope_type")
+  scopeKey        String    @default("global") @map("scope_key")
+  status          String    @default("active")
+  valueNumeric    Decimal?  @map("value_numeric") @db.Decimal(14, 4)
+  valueCount      Int?      @map("value_count")
+  summary         String?
+  firstTriggeredAt DateTime @default(now()) @map("first_triggered_at")
+  lastTriggeredAt DateTime  @default(now()) @map("last_triggered_at")
+  resolvedAt      DateTime? @map("resolved_at")
+  metadata        Json?
+
+  @@unique([alertType, scopeType, scopeKey, status])
+  @@index([status, lastTriggeredAt])
+  @@index([alertType, status])
+  @@map("sla_alert_events")
+}
+
+model SlaAlertDelivery {
+  id               String    @id @default(uuid())
+  alertEventId     String?   @map("alert_event_id")
+  eventType        String    @map("event_type")
+  destinationUrl   String    @map("destination_url")
+  payload          Json
+  status           String    @default("pending")
+  attempts         Int       @default(0)
+  maxAttempts      Int       @default(6) @map("max_attempts")
+  nextAttemptAt    DateTime  @default(now()) @map("next_attempt_at")
+  lockedAt         DateTime? @map("locked_at")
+  lockedBy         String?   @map("locked_by")
+  lastAttemptAt    DateTime? @map("last_attempt_at")
+  lastHttpStatus   Int?      @map("last_http_status")
+  lastError        String?   @map("last_error")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime? @updatedAt @map("updated_at")
+  metadata         Json?
+
+  @@index([status, nextAttemptAt])
+  @@index([eventType, status, createdAt])
+  @@map("sla_alert_deliveries")
+}
+
+model SlaAlertDeliveryAttempt {
+  id             String   @id @default(uuid())
+  deliveryId     String   @map("delivery_id")
+  attemptNumber  Int      @map("attempt_number")
+  status         String
+  httpStatus     Int?     @map("http_status")
+  responseBody   String?  @map("response_body")
+  errorMessage   String?  @map("error_message")
+  attemptedAt    DateTime @default(now()) @map("attempted_at")
+  metadata       Json?
+
+  @@index([deliveryId, attemptNumber])
+  @@index([attemptedAt])
+  @@map("sla_alert_delivery_attempts")
+}
+
+model SlaAlertDeadLetter {
+  id             String   @id @default(uuid())
+  deliveryId     String   @map("delivery_id")
+  eventType      String   @map("event_type")
+  destinationUrl String   @map("destination_url")
+  payload        Json?
+  attempts       Int      @default(0)
+  maxAttempts    Int      @default(0) @map("max_attempts")
+  finalError     String?  @map("final_error")
+  finalHttpStatus Int?    @map("final_http_status")
+  failedAt       DateTime @default(now()) @map("failed_at")
+  metadata       Json?
+
+  @@index([failedAt])
+  @@index([eventType, failedAt])
+  @@map("sla_alert_dead_letters")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  actorUserId String?  @map("actor_user_id")
+  actorRole   String?  @map("actor_role")
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String?  @map("entity_id")
+  requestId   String?  @map("request_id")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  actor       User?    @relation(fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([actorUserId, createdAt])
+  @@index([entityType, entityId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_logs")
+}
+
 enum UserRole {
   customer
   bakery_owner
   restaurant_owner
   admin
+  driver
+}
+
+enum DriverStatus {
+  offline
+  online
+  busy
 }
 
 enum AddressType {
@@ -323,6 +1110,11 @@ enum BakeryStatus {
   pending_approval
   approved
   rejected
+}
+
+enum DeliveryProvider {
+  bakery
+  third_party
 }
 
 enum RestaurantStatus {
@@ -353,6 +1145,7 @@ enum OrderType {
 }
 
 enum PaymentMethod {
+  online_card
   credit_card
   debit_card
   cash_on_delivery
@@ -363,7 +1156,16 @@ enum PaymentStatus {
   pending
   paid
   failed
+  cancelled
   refunded
+  cod_pending
+  cod_collected
+}
+
+enum PaymentProvider {
+  stripe
+  noon
+  cod
 }
 
 enum ReviewType {
@@ -379,8 +1181,68 @@ enum NotificationType {
   account
 }
 
+enum FavoriteTargetType {
+  bakery
+  restaurant
+  product
+}
+
 enum CategoryType {
   bakery
   restaurant
   common
+}
+
+enum VendorType {
+  bakery
+  restaurant
+}
+
+enum CommissionScope {
+  global
+  vendor
+}
+
+enum RefundStatus {
+  pending
+  approved
+  rejected
+  processing
+  completed
+  failed
+}
+
+enum DisputeStatus {
+  open
+  vendor_responded
+  under_review
+  resolved
+  rejected
+}
+
+enum PayoutStatus {
+  requested
+  approved
+  rejected
+  paid
+  failed
+}
+
+enum FinancialTransactionType {
+  order_payment
+  refund
+  payout
+  commission
+  adjustment
+}
+
+enum NotificationJobStatus {
+  pending
+  processing
+  sent
+  failed
+}
+
+enum RecurringOrderFrequency {
+  daily
 }

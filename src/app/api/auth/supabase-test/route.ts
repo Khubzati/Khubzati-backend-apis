@@ -1,13 +1,28 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseKey);
+function getSupabaseClient() {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !supabaseKey) {
+        return null;
+    }
+
+    return createClient(supabaseUrl, supabaseKey);
+}
 
 export async function POST(request: Request) {
     try {
+        const supabase = getSupabaseClient();
+
+        if (!supabase) {
+            return NextResponse.json({
+                status: 'error',
+                message: 'Supabase environment variables are not configured'
+            }, { status: 500 });
+        }
+
         const { email, password, phoneNumber, fullName } = await request.json();
 
         // First, sign up the user
@@ -56,11 +71,15 @@ export async function POST(request: Request) {
             data: authData
         }, { status: 201 });
 
-    } catch (error: any) {
+    } catch (error: unknown) {
+        const message = error instanceof Error
+            ? error.message
+            : 'An error occurred during registration';
+
         console.error('Registration error:', error);
         return NextResponse.json({
             status: 'error',
-            message: error.message || 'An error occurred during registration'
+            message
         }, { status: 500 });
     }
-} 
+}

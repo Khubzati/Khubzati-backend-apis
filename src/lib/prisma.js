@@ -1,7 +1,15 @@
-// src/lib/prisma.js
-import { PrismaClient } from '@prisma/client';
+const { PrismaClient } = require('@prisma/client');
 
-// Create a singleton instance of PrismaClient
-const prisma = new PrismaClient();
+const globalForPrisma = globalThis;
 
-export default prisma;
+const prisma =
+  globalForPrisma.__khubzatiPrismaClient ||
+  new PrismaClient({
+    log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
+  });
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForPrisma.__khubzatiPrismaClient = prisma;
+}
+
+module.exports = prisma;

@@ -1,10 +1,10 @@
 const express = require('express');
-const { PrismaClient } = require('../generated/prisma');
+const prisma = require('../lib/prisma');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const { ORDER_STATUSES, resolveOrderStatus } = require('../utils/order-status');
-const { notifyUser } = require('../services/notificationDispatchService');
+const { notifyUser, notifyUsers } = require('../services/notificationDispatchService');
+const { orderEmailService } = require('../services/orderEmailService');
 
-const prisma = new PrismaClient();
 const router = express.Router();
 
 const enableStubs = (process.env.ENABLE_STUB_RESPONSES || '').toLowerCase() === 'true';
@@ -1680,7 +1680,37 @@ router.put('/orders/:orderId/status', authenticateToken, authorizeRole(['bakery_
                 id: orderId,
                 bakeryId: bakeryIdToUse,
                 deletedAt: null
-            }
+            },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        email: true,
+                        fullName: true,
+                    },
+                },
+                bakery: {
+                    select: {
+                        id: true,
+                        name: true,
+                    },
+                },
+                restaurant: {
+                    select: {
+                        id: true,
+                        name: true,
+                        email: true,
+                        ownerId: true,
+                        owner: {
+                            select: {
+                                id: true,
+                                email: true,
+                                fullName: true,
+                            },
+                        },
+                    },
+                },
+            },
         });
 
         if (!order) {
@@ -1690,13 +1720,84 @@ router.put('/orders/:orderId/status', authenticateToken, authorizeRole(['bakery_
             });
         }
 
-        const updatedOrder = await prisma.order.update({
-            where: { id: orderId },
-            data: {
-                status: resolvedStatus,
-                updatedBy: req.user.id,
-                updatedAt: new Date()
+        const wasAlreadyCancelled = order.status === 'cancelled';
+        const cancellationReason = typeof notes === 'string' ? notes.trim() : '';
+
+        const updatedOrder = await prisma.$transaction(async (tx) => {
+            const nextOrder = await tx.order.update({
+                where: { id: orderId },
+                data: {
+                    status: resolvedStatus,
+                    updatedBy: req.user.id,
+                    updatedAt: new Date()
+                }
+            });
+
+            if (resolvedStatus === 'cancelled' && !wasAlreadyCancelled) {
+                const orderItems = await tx.orderItem.findMany({
+                    where: { orderId },
+                    select: {
+                        productId: true,
+                        quantity: true,
+                    },
+                });
+
+                for (const item of orderItems) {
+                    const quantity = Number(item.quantity || 0);
+                    if (!Number.isFinite(quantity) || quantity <= 0) continue;
+
+                    const product = await tx.product.findUnique({
+                        where: { id: item.productId },
+                        select: { stockQuantity: true },
+                    });
+                    if (!product) continue;
+
+                    const quantityBefore = Number(product.stockQuantity || 0);
+                    const quantityAfter = quantityBefore + quantity;
+
+                    await tx.product.update({
+                        where: { id: item.productId },
+                        data: {
+                            stockQuantity: { increment: quantity },
+                            updatedBy: req.user.id,
+                        },
+                    });
+
+                    await tx.inventoryMovement.create({
+                        data: {
+                            productId: item.productId,
+                            orderId,
+                            movementType: 'release',
+                            quantityBefore,
+                            quantityDelta: quantity,
+                            quantityAfter,
+                            reason: 'order_cancelled_by_bakery',
+                            actorUserId: req.user.id,
+                        },
+                    });
+                }
+
+                await tx.orderCancellationReason.upsert({
+                    where: { orderId },
+                    update: {
+                        reasonCode: 'bakery_cancelled',
+                        reasonText: cancellationReason || null,
+                        cancelledByUserId: req.user.id,
+                        cancelledByRole: req.user.role,
+                        metadata: { source: 'bakery.orders.status' },
+                    },
+                    create: {
+                        orderId,
+                        reasonCode: 'bakery_cancelled',
+                        reasonText: cancellationReason || null,
+                        cancelledByUserId: req.user.id,
+                        cancelledByRole: req.user.role,
+                        metadata: { source: 'bakery.orders.status' },
+                    },
+                });
             }
+
+            return nextOrder;
         });
 
         // Create notification
@@ -1725,6 +1826,84 @@ router.put('/orders/:orderId/status', authenticateToken, authorizeRole(['bakery_
                 status: resolvedStatus,
             },
         });
+
+        // If bakery cancels, explicitly notify the restaurant side and send cancellation email.
+        if (resolvedStatus === 'cancelled' && !wasAlreadyCancelled) {
+            const bakeryName = order?.bakery?.name || 'Bakery';
+            const reasonSuffix = cancellationReason ? ` Reason: ${cancellationReason}` : '';
+
+            const restaurantOwnerUserId = order?.restaurant?.ownerId;
+            const restaurantRecipientUserIds = [restaurantOwnerUserId]
+                .filter((id) => id && id !== order.userId);
+
+            if (restaurantRecipientUserIds.length) {
+                await notifyUsers({
+                    prisma,
+                    userIds: restaurantRecipientUserIds,
+                    title: 'Order Cancelled by Bakery',
+                    message: `Order #${order.orderNumber} was cancelled by ${bakeryName}.${reasonSuffix}`,
+                    type: 'order',
+                    relatedId: order.id,
+                    createdBy: req.user.id || 'system',
+                    data: {
+                        event: 'order_cancelled_by_bakery',
+                        orderId: order.id,
+                        orderNumber: order.orderNumber,
+                        status: resolvedStatus,
+                        cancellationReason,
+                    },
+                });
+            }
+
+            const rawEmailTargets = [
+                {
+                    email: order?.restaurant?.email,
+                    name: order?.restaurant?.name,
+                },
+                {
+                    email: order?.restaurant?.owner?.email,
+                    name: order?.restaurant?.owner?.fullName || order?.restaurant?.name,
+                },
+            ];
+
+            const dedupedEmailTargets = [];
+            const seenEmails = new Set();
+            for (const target of rawEmailTargets) {
+                const email = String(target?.email || '').trim().toLowerCase();
+                if (!email || seenEmails.has(email)) continue;
+                seenEmails.add(email);
+                dedupedEmailTargets.push({
+                    email,
+                    name: target?.name || 'Restaurant Partner',
+                });
+            }
+
+            // Fallback: if restaurant contact emails are not available, use order user email.
+            if (!dedupedEmailTargets.length && order?.user?.email) {
+                dedupedEmailTargets.push({
+                    email: String(order.user.email).trim().toLowerCase(),
+                    name: order?.user?.fullName || order?.restaurant?.name || 'Restaurant Partner',
+                });
+            }
+
+            for (const recipient of dedupedEmailTargets) {
+                try {
+                    // eslint-disable-next-line no-await-in-loop
+                    await orderEmailService.sendOrderCancelledToRecipient({
+                        order,
+                        recipientEmail: recipient.email,
+                        recipientName: recipient.name,
+                        cancelledByName: bakeryName,
+                        cancellationReason,
+                    });
+                } catch (emailError) {
+                    console.error(
+                        `Order cancellation email failed for ${recipient.email}:`,
+                        emailError?.message || emailError,
+                    );
+                }
+            }
+        }
 
         return res.status(200).json({
             status: 'success',

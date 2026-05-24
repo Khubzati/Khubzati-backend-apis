@@ -1,11 +1,22 @@
 const express = require('express');
-const { PrismaClient } = require('../generated/prisma');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const prisma = require('../lib/prisma');
 const { ORDER_STATUSES, resolveOrderStatus } = require('../utils/order-status');
+const {
+    ALL_CITIES_KEY,
+    aggregateKpisRange,
+} = require('../services/kpiAggregationService');
+const {
+    evaluateSlaAlerts,
+    processPendingAlertDeliveries,
+    enqueueAlertDelivery,
+    getWebhookConfig,
+} = require('../services/slaAlertService');
+const { DEFAULT_TIMEZONE, normalizeDateKey } = require('../services/timezoneWindowService');
+const { logAuditEvent } = require('../services/auditLogService');
 
-const prisma = new PrismaClient();
 const router = express.Router();
 
 const normalizeDocumentUrl = (value) => {
@@ -74,6 +85,8 @@ const mapVendorForAdmin = (vendor, type) => {
         ownerEmail: vendor?.owner?.email ?? vendor?.ownerEmail,
         averageRating: vendor?.averageRating ?? 0,
         reviewCount: vendor?.reviewCount ?? 0,
+        rejectionReason: vendor?.rejectionReason ?? null,
+        rejectedAt: vendor?.rejectedAt ?? null,
     };
 
     return {
@@ -103,6 +116,20 @@ const parseBoolean = (value, fallback = false) => {
     if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
     if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
     return fallback;
+};
+
+const parsePositiveInt = (value, fallback, { min = 1, max = 1000 } = {}) => {
+    const parsed = Number.parseInt(String(value ?? ''), 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(Math.max(parsed, min), max);
+};
+
+const isValidDateKey = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim());
+
+const decimalToNumber = (value) => {
+    if (value === null || value === undefined) return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
 };
 
 const normalizeBreadTypeImageUrl = (rawUrl) => {
@@ -168,112 +195,84 @@ const serializeBreadType = (item) => ({
     updatedAt: item.updatedAt,
 });
 
+const restockOrderInventoryForCancellation = async ({ tx, orderId, actorUserId }) => {
+    const items = await tx.orderItem.findMany({
+        where: { orderId },
+        select: {
+            productId: true,
+            quantity: true,
+        },
+    });
+
+    for (const item of items) {
+        const quantity = Number(item.quantity || 0);
+        if (!Number.isFinite(quantity) || quantity <= 0) continue;
+
+        const product = await tx.product.findUnique({
+            where: { id: item.productId },
+            select: { stockQuantity: true },
+        });
+        if (!product) continue;
+
+        const quantityBefore = Number(product.stockQuantity || 0);
+        const quantityAfter = quantityBefore + quantity;
+
+        await tx.product.update({
+            where: { id: item.productId },
+            data: {
+                stockQuantity: { increment: quantity },
+                updatedBy: actorUserId,
+            },
+        });
+
+        await tx.inventoryMovement.create({
+            data: {
+                productId: item.productId,
+                orderId,
+                movementType: 'release',
+                quantityBefore,
+                quantityDelta: quantity,
+                quantityAfter,
+                reason: 'order_cancelled_by_admin',
+                actorUserId,
+            },
+        });
+    }
+};
+
 // Admin Auth Routes (public)
 router.post('/auth/login', async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const email = String(req.body?.email || '').trim().toLowerCase();
+        const password = String(req.body?.password || '');
 
-        // Allow default credentials fallback in non-production to make automated tests simpler
-        const effectiveEmail = email || process.env.ADMIN_EMAIL;
-        const effectivePassword = password || process.env.ADMIN_PASSWORD;
-
-        if (!effectiveEmail || !effectivePassword) {
+        if (!email || !password) {
             return res.status(400).json({
                 status: 'fail',
                 message: 'Email and password are required'
             });
         }
 
-        let user = await prisma.user.findFirst({
+        const user = await prisma.user.findFirst({
             where: {
-                email: effectiveEmail,
+                email: {
+                    equals: email,
+                    mode: 'insensitive',
+                },
                 role: 'admin',
                 deletedAt: null
             }
         });
 
         if (!user) {
-            if (process.env.NODE_ENV !== 'production') {
-                // In non-production, keep admin login idempotent for local/dev workflows.
-                const salt = await bcrypt.genSalt(10);
-                const hashed = await bcrypt.hash(effectivePassword, salt);
-
-                // 1) Reuse existing account by email (even if role is not admin).
-                const existingByEmail = await prisma.user.findUnique({
-                    where: { email: effectiveEmail },
-                });
-
-                if (existingByEmail) {
-                    user = await prisma.user.update({
-                        where: { id: existingByEmail.id },
-                        data: {
-                            password: hashed,
-                            role: 'admin',
-                            isVerified: true,
-                            deletedAt: null,
-                        },
-                    });
-                } else {
-                    // 2) Reuse any existing admin account.
-                    const existingAdmin = await prisma.user.findFirst({
-                        where: {
-                            role: 'admin',
-                            deletedAt: null,
-                        },
-                    });
-
-                    if (existingAdmin) {
-                        user = await prisma.user.update({
-                            where: { id: existingAdmin.id },
-                            data: {
-                                password: hashed,
-                                isVerified: true,
-                            },
-                        });
-                    } else {
-                        // 3) Create a fresh admin with collision-safe defaults.
-                        let username = process.env.ADMIN_USERNAME || effectiveEmail;
-                        let phoneNumber = process.env.ADMIN_PHONE_NUMBER || '+962790000000';
-
-                        const usernameExists = await prisma.user.findUnique({
-                            where: { username },
-                        });
-                        if (usernameExists) {
-                            username = `admin-${Date.now()}`;
-                        }
-
-                        const phoneExists = await prisma.user.findUnique({
-                            where: { phoneNumber },
-                        });
-                        if (phoneExists) {
-                            phoneNumber = `+96279${Date.now().toString().slice(-7)}`;
-                        }
-
-                        user = await prisma.user.create({
-                            data: {
-                                email: effectiveEmail,
-                                username,
-                                password: hashed,
-                                fullName: process.env.ADMIN_FULL_NAME || 'Admin',
-                                phoneNumber,
-                                role: 'admin',
-                                isVerified: true,
-                            },
-                        });
-                    }
-                }
-
-                const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '24h' });
-                return res.status(200).json({ status: 'success', data: { user: { id: user.id, email: user.email, role: user.role }, token } });
-            }
             return res.status(401).json({
                 status: 'fail',
                 message: 'Invalid credentials'
             });
         }
 
-        const isPasswordValid = await bcrypt.compare(effectivePassword, user.password);
-        if (!isPasswordValid && process.env.NODE_ENV === 'production') {
+        const isPasswordValid = await bcrypt.compare(password, user.password);
+        if (!isPasswordValid) {
             return res.status(401).json({
                 status: 'fail',
                 message: 'Invalid credentials'
@@ -726,7 +725,7 @@ router.get('/dashboard', async (req, res) => {
                 totalOrders,
                 totalRevenue: Number(statsResult._sum.totalAmount || 0),
                 pendingApprovals: bakeries + restaurants,
-                activeIssues: 0, // TODO: Implement issues tracking
+                activeIssues: 0,
                 todayOrders,
                 todayRevenue: Number(todayRevenue._sum.totalAmount || 0),
             },
@@ -734,6 +733,87 @@ router.get('/dashboard', async (req, res) => {
             orderTrends: [],
             topVendors: [],
             recentActivity: []
+        };
+
+        const since = new Date();
+        since.setUTCDate(since.getUTCDate() - 14);
+        since.setUTCHours(0, 0, 0, 0);
+
+        const [kpiRows, activeSlaBreaches, payoutRisk, disputeRisk, dispatchRisk] = await Promise.all([
+            prisma.kpiDailyFact.findMany({
+                where: {
+                    city: ALL_CITIES_KEY,
+                    metricDate: {
+                        gte: since,
+                    },
+                },
+                orderBy: { metricDate: 'asc' },
+                take: 30,
+            }),
+            prisma.slaAlertEvent.findMany({
+                where: { status: 'active' },
+                orderBy: { lastTriggeredAt: 'desc' },
+                take: 10,
+            }),
+            prisma.payoutRequest.count({
+                where: {
+                    status: { in: ['requested', 'approved'] },
+                    createdAt: {
+                        lt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+                    },
+                },
+            }),
+            prisma.disputeCase.count({
+                where: {
+                    status: { in: ['open', 'under_review', 'vendor_responded'] },
+                    createdAt: {
+                        lt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+                    },
+                },
+            }),
+            prisma.dispatchJob.count({
+                where: {
+                    status: 'pending',
+                    slaDueAt: {
+                        lt: new Date(),
+                    },
+                },
+            }),
+        ]);
+
+        const kpiTrend = kpiRows.map((row) => ({
+            metricDate: row.metricDate,
+            fillRate: decimalToNumber(row.fillRate),
+            stockoutRate: decimalToNumber(row.stockoutRate),
+            assignmentLatencySec: row.assignmentLatencySec,
+            onTimeDeliveryRate: decimalToNumber(row.onTimeDeliveryRate),
+            refundRatio: decimalToNumber(row.refundRatio),
+            payoutAgingHours: row.payoutAgingHours,
+            disputeAgingHours: row.disputeAgingHours,
+            cancellationRate: decimalToNumber(row.cancellationRate),
+            ordersCount: row.ordersCount,
+            disputesOpenCount: row.disputesOpenCount,
+        }));
+
+        const riskCards = [
+            { type: 'payout', severity: payoutRisk > 10 ? 'critical' : payoutRisk > 0 ? 'warning' : 'normal', count: payoutRisk },
+            { type: 'dispute', severity: disputeRisk > 10 ? 'critical' : disputeRisk > 0 ? 'warning' : 'normal', count: disputeRisk },
+            { type: 'dispatch', severity: dispatchRisk > 5 ? 'critical' : dispatchRisk > 0 ? 'warning' : 'normal', count: dispatchRisk },
+        ];
+
+        dashboardData.stats.activeIssues = activeSlaBreaches.length + riskCards.reduce((sum, item) => sum + (item.count > 0 ? 1 : 0), 0);
+        dashboardData.marketplaceHealth = {
+            dailyKpiTrend: kpiTrend,
+            activeBreaches: activeSlaBreaches.map((breach) => ({
+                id: breach.id,
+                alertType: breach.alertType,
+                summary: breach.summary,
+                valueNumeric: decimalToNumber(breach.valueNumeric),
+                valueCount: breach.valueCount,
+                firstTriggeredAt: breach.firstTriggeredAt,
+                lastTriggeredAt: breach.lastTriggeredAt,
+            })),
+            riskCards,
         };
 
         return res.status(200).json({
@@ -745,6 +825,291 @@ router.get('/dashboard', async (req, res) => {
         return res.status(500).json({
             status: 'error',
             message: 'An error occurred while fetching dashboard data'
+        });
+    }
+});
+
+router.get('/kpis/daily', async (req, res) => {
+    try {
+        const {
+            fromDate,
+            toDate,
+            city,
+            page = 1,
+            limit = 30,
+        } = req.query;
+
+        const where = {};
+        if (fromDate || toDate) {
+            if (fromDate && !isValidDateKey(fromDate)) {
+                return res.status(400).json({ status: 'fail', message: 'fromDate must be YYYY-MM-DD' });
+            }
+            if (toDate && !isValidDateKey(toDate)) {
+                return res.status(400).json({ status: 'fail', message: 'toDate must be YYYY-MM-DD' });
+            }
+
+            where.metricDate = {};
+            if (fromDate) where.metricDate.gte = new Date(`${String(fromDate)}T00:00:00.000Z`);
+            if (toDate) where.metricDate.lte = new Date(`${String(toDate)}T00:00:00.000Z`);
+        }
+
+        if (city) {
+            const normalizedCity = String(city).trim();
+            if (normalizedCity.toLowerCase() === 'all') {
+                where.city = ALL_CITIES_KEY;
+            } else {
+                where.city = normalizedCity;
+            }
+        }
+
+        const limitNumber = parsePositiveInt(limit, 30, { min: 1, max: 200 });
+        const pageNumber = parsePositiveInt(page, 1, { min: 1, max: 100000 });
+        const skip = (pageNumber - 1) * limitNumber;
+
+        const [items, total] = await Promise.all([
+            prisma.kpiDailyFact.findMany({
+                where,
+                orderBy: [{ metricDate: 'desc' }, { city: 'asc' }],
+                skip,
+                take: limitNumber,
+            }),
+            prisma.kpiDailyFact.count({ where }),
+        ]);
+
+        return res.status(200).json({
+            status: 'success',
+            data: {
+                items: items.map((row) => ({
+                    id: row.id,
+                    metricDate: row.metricDate,
+                    city: row.city === ALL_CITIES_KEY ? 'all' : row.city,
+                    fillRate: decimalToNumber(row.fillRate),
+                    stockoutRate: decimalToNumber(row.stockoutRate),
+                    assignmentLatencySec: row.assignmentLatencySec,
+                    onTimeDeliveryRate: decimalToNumber(row.onTimeDeliveryRate),
+                    refundRatio: decimalToNumber(row.refundRatio),
+                    payoutAgingHours: row.payoutAgingHours,
+                    disputeAgingHours: row.disputeAgingHours,
+                    cancellationRate: decimalToNumber(row.cancellationRate),
+                    ordersCount: row.ordersCount,
+                    disputesOpenCount: row.disputesOpenCount,
+                    metadata: row.metadata || null,
+                    createdAt: row.createdAt,
+                    updatedAt: row.updatedAt,
+                })),
+                pagination: {
+                    total,
+                    page: pageNumber,
+                    limit: limitNumber,
+                    pages: Math.ceil(total / limitNumber),
+                },
+            },
+        });
+    } catch (error) {
+        console.error('Admin list KPI daily error:', error);
+        return res.status(500).json({
+            status: 'error',
+            message: 'Unable to fetch daily KPI data',
+        });
+    }
+});
+
+router.get('/alerts/active', async (req, res) => {
+    try {
+        const {
+            alertType,
+            status = 'active',
+            page = 1,
+            limit = 30,
+        } = req.query;
+
+        const where = {};
+        if (alertType) where.alertType = String(alertType).trim();
+        if (status && ['active', 'resolved', 'failed'].includes(String(status).trim().toLowerCase())) {
+            where.status = String(status).trim().toLowerCase();
+        }
+
+        const limitNumber = parsePositiveInt(limit, 30, { min: 1, max: 200 });
+        const pageNumber = parsePositiveInt(page, 1, { min: 1, max: 100000 });
+        const skip = (pageNumber - 1) * limitNumber;
+
+        const [items, total, queueByStatus] = await Promise.all([
+            prisma.slaAlertEvent.findMany({
+                where,
+                orderBy: { lastTriggeredAt: 'desc' },
+                skip,
+                take: limitNumber,
+            }),
+            prisma.slaAlertEvent.count({ where }),
+            prisma.slaAlertDelivery.groupBy({
+                by: ['status'],
+                _count: { status: true },
+            }),
+        ]);
+
+        const queueStatusCounts = queueByStatus.reduce((acc, row) => {
+            acc[row.status] = row._count.status;
+            return acc;
+        }, {});
+
+        return res.status(200).json({
+            status: 'success',
+            data: {
+                items: items.map((item) => ({
+                    ...item,
+                    valueNumeric: decimalToNumber(item.valueNumeric),
+                })),
+                pagination: {
+                    total,
+                    page: pageNumber,
+                    limit: limitNumber,
+                    pages: Math.ceil(total / limitNumber),
+                },
+                queue: queueStatusCounts,
+            },
+        });
+    } catch (error) {
+        console.error('Admin list active alerts error:', error);
+        return res.status(500).json({
+            status: 'error',
+            message: 'Unable to fetch active alerts',
+        });
+    }
+});
+
+router.post('/kpis/backfill', async (req, res) => {
+    try {
+        const timeZone = String(req.body?.timeZone || DEFAULT_TIMEZONE).trim() || DEFAULT_TIMEZONE;
+        const fromDate = String(req.body?.fromDate || '').trim();
+        const toDate = String(req.body?.toDate || '').trim();
+        const force = parseBoolean(req.body?.force, false);
+
+        if (!isValidDateKey(fromDate) || !isValidDateKey(toDate)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'fromDate and toDate are required in YYYY-MM-DD format',
+            });
+        }
+
+        const result = await aggregateKpisRange({
+            prisma,
+            fromDate: normalizeDateKey(fromDate),
+            toDate: normalizeDateKey(toDate),
+            timeZone,
+            force,
+            initiatedBy: req.user.id,
+            source: 'admin_api',
+        });
+
+        await logAuditEvent({
+            prisma,
+            req,
+            action: 'admin.kpi.backfill',
+            entityType: 'kpi_aggregation_run',
+            entityId: result?.run?.id || null,
+            metadata: {
+                fromDate,
+                toDate,
+                timeZone,
+                force,
+                skipped: result?.skipped === true,
+                totalUpserted: result?.totalUpserted || 0,
+            },
+        });
+
+        return res.status(200).json({
+            status: 'success',
+            data: {
+                run: result.run,
+                skipped: result.skipped,
+                totalUpserted: result.totalUpserted || 0,
+                dates: (result.dates || []).map((item) => ({
+                    dateKey: item.dateKey,
+                    upserted: item.upserted,
+                    startUtc: item.window?.startUtc,
+                    endUtc: item.window?.endUtc,
+                })),
+            },
+        });
+    } catch (error) {
+        console.error('Admin KPI backfill error:', error);
+        return res.status(500).json({
+            status: 'error',
+            message: 'Unable to run KPI backfill',
+        });
+    }
+});
+
+router.post('/alerts/test-webhook', async (req, res) => {
+    try {
+        const webhookConfig = getWebhookConfig();
+        if (!webhookConfig.url) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'SLA alert webhook URL is not configured',
+            });
+        }
+
+        const eventType = String(req.body?.eventType || 'alerts.test').trim();
+        const payload = {
+            type: eventType,
+            status: 'test',
+            summary: String(req.body?.summary || 'Admin triggered SLA webhook test'),
+            valueCount: Number(req.body?.valueCount || 0),
+            valueNumeric: Number(req.body?.valueNumeric || 0),
+            metadata: req.body?.metadata && typeof req.body.metadata === 'object' ? req.body.metadata : null,
+            occurredAt: new Date().toISOString(),
+            triggeredBy: req.user.id,
+        };
+
+        const delivery = await enqueueAlertDelivery({
+            prisma,
+            eventType,
+            alertEventId: null,
+            payload,
+            metadata: {
+                source: 'admin_test_webhook',
+                userId: req.user.id,
+            },
+        });
+
+        const processNow = parseBoolean(req.body?.processNow, true);
+        let processResult = null;
+        if (processNow) {
+            processResult = await processPendingAlertDeliveries({
+                prisma,
+                workerId: `admin-test-${req.user.id}`,
+                limit: 5,
+            });
+        }
+
+        await logAuditEvent({
+            prisma,
+            req,
+            action: 'admin.alerts.test_webhook',
+            entityType: 'sla_alert_delivery',
+            entityId: delivery?.id || null,
+            metadata: {
+                eventType,
+                processNow,
+                webhookDestination: webhookConfig.url,
+                processed: processResult?.processed || 0,
+                failed: processResult?.failed || 0,
+            },
+        });
+
+        return res.status(200).json({
+            status: 'success',
+            data: {
+                delivery,
+                processResult,
+            },
+        });
+    } catch (error) {
+        console.error('Admin test alert webhook error:', error);
+        return res.status(500).json({
+            status: 'error',
+            message: 'Unable to send test webhook',
         });
     }
 });
@@ -1568,6 +1933,8 @@ router.get('/vendors/pending', async (req, res) => {
                     logoUrl: pendingBakery?.logoUrl || owner.profilePictureUrl || null,
                     coverImageUrl: pendingBakery?.coverImageUrl || null,
                     commercialRegistryUrl: pendingBakery?.commercialRegistryUrl || null,
+                    rejectionReason: pendingBakery?.rejectionReason || null,
+                    rejectedAt: pendingBakery?.rejectedAt || null,
                     operatingHours: pendingBakery?.operatingHours || null,
                     ownerId: owner.id,
                     ownerName: owner.fullName || owner.username,
@@ -1612,26 +1979,40 @@ router.get('/vendors/pending', async (req, res) => {
 });
 
 // Vendor status actions (approve/reject/suspend/activate)
-const allowTestFallbacksAdmin = true;
 const upsertVendorStatus = async (id, status) => {
     const bakery = await prisma.bakery.findUnique({ where: { id } });
     if (bakery) {
-        return prisma.bakery.update({ where: { id }, data: { status, deletedAt: null } });
+        return prisma.bakery.update({
+            where: { id },
+            data: {
+                status,
+                deletedAt: null,
+                ...(status === 'approved'
+                    ? { rejectionReason: null, rejectedAt: null }
+                    : { rejectedAt: new Date() }),
+            },
+        });
     }
     const restaurant = await prisma.restaurant.findUnique({ where: { id } });
     if (restaurant) {
-        return prisma.restaurant.update({ where: { id }, data: { status, deletedAt: null } });
+        return prisma.restaurant.update({
+            where: { id },
+            data: {
+                status,
+                deletedAt: null,
+                ...(status === 'approved'
+                    ? { rejectionReason: null, rejectedAt: null }
+                    : { rejectedAt: new Date() }),
+            },
+        });
     }
-    if (allowTestFallbacksAdmin) return null;
     throw new Error('Vendor not found');
 };
 
-['approve', 'reject', 'suspend', 'activate'].forEach((action) => {
+['suspend', 'activate'].forEach((action) => {
     router.put(`/vendors/:vendorId/${action}`, async (req, res) => {
         try {
             const statusMap = {
-                approve: 'approved',
-                reject: 'rejected',
                 suspend: 'rejected', // Prisma enum only supports approved/pending_approval/rejected
                 activate: 'approved',
             };
@@ -1639,8 +2020,8 @@ const upsertVendorStatus = async (id, status) => {
             return res.status(200).json({ status: 'success', message: `Vendor ${action}d` });
         } catch (error) {
             console.error(`${action} vendor error:`, error);
-            return res.status(allowTestFallbacksAdmin ? 200 : 404).json({
-                status: allowTestFallbacksAdmin ? 'success' : 'fail',
+            return res.status(404).json({
+                status: 'fail',
                 message: 'Vendor not found'
             });
         }
@@ -1727,6 +2108,8 @@ router.get('/vendors/:id', async (req, res) => {
                 logoUrl: pendingBakery?.logoUrl || bakeryOwner.profilePictureUrl || null,
                 coverImageUrl: pendingBakery?.coverImageUrl || null,
                 commercialRegistryUrl: pendingBakery?.commercialRegistryUrl || null,
+                rejectionReason: pendingBakery?.rejectionReason || null,
+                rejectedAt: pendingBakery?.rejectedAt || null,
                 operatingHours: pendingBakery?.operatingHours || null,
                 ownerId: bakeryOwner.id,
                 ownerName: bakeryOwner.fullName || bakeryOwner.username,
@@ -1766,7 +2149,12 @@ router.put('/vendors/:id/approve', async (req, res) => {
         if (vendor) {
             await prisma.bakery.update({
                 where: { id },
-                data: { status: 'approved', updatedBy: req.user.id }
+                data: {
+                    status: 'approved',
+                    rejectionReason: null,
+                    rejectedAt: null,
+                    updatedBy: req.user.id,
+                }
             });
             // Check if owner has all bakeries approved, then verify the user
             if (vendor.ownerId) {
@@ -1795,7 +2183,12 @@ router.put('/vendors/:id/approve', async (req, res) => {
         if (vendor) {
             await prisma.restaurant.update({
                 where: { id },
-                data: { status: 'approved', updatedBy: req.user.id }
+                data: {
+                    status: 'approved',
+                    rejectionReason: null,
+                    rejectedAt: null,
+                    updatedBy: req.user.id,
+                }
             });
             // Check if owner has all restaurants approved, then verify the user
             if (vendor.ownerId) {
@@ -1842,6 +2235,8 @@ router.put('/vendors/:id/approve', async (req, res) => {
                 },
                 data: {
                     status: 'approved',
+                    rejectionReason: null,
+                    rejectedAt: null,
                     updatedBy: req.user.id
                 }
             });
@@ -1875,14 +2270,25 @@ router.put('/vendors/:id/approve', async (req, res) => {
 router.put('/vendors/:id/reject', async (req, res) => {
     try {
         const { id } = req.params;
-        const { reason } = req.body;
+        const reason = String(req.body?.reason || '').trim();
+        if (!reason) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Rejection reason is required',
+            });
+        }
 
         // Try bakery first
         let vendor = await prisma.bakery.findUnique({ where: { id }, include: { owner: true } });
         if (vendor) {
             await prisma.bakery.update({
                 where: { id },
-                data: { status: 'rejected', updatedBy: req.user.id }
+                data: {
+                    status: 'rejected',
+                    rejectionReason: reason,
+                    rejectedAt: new Date(),
+                    updatedBy: req.user.id,
+                }
             });
             // Check if owner has any approved bakeries left, if not, unverify
             if (vendor.ownerId) {
@@ -1911,7 +2317,12 @@ router.put('/vendors/:id/reject', async (req, res) => {
         if (vendor) {
             await prisma.restaurant.update({
                 where: { id },
-                data: { status: 'rejected', updatedBy: req.user.id }
+                data: {
+                    status: 'rejected',
+                    rejectionReason: reason,
+                    rejectedAt: new Date(),
+                    updatedBy: req.user.id,
+                }
             });
             // Check if owner has any approved restaurants left, if not, unverify
             if (vendor.ownerId) {
@@ -1958,6 +2369,8 @@ router.put('/vendors/:id/reject', async (req, res) => {
                 },
                 data: {
                     status: 'rejected',
+                    rejectionReason: reason,
+                    rejectedAt: new Date(),
                     updatedBy: req.user.id
                 }
             });
@@ -2099,7 +2512,6 @@ router.get('/orders/:orderId', async (req, res) => {
             }
         });
         if (!order) {
-            if (allowTestFallbacksAdmin) return res.status(200).json({ status: 'success', data: { order: {} } });
             return res.status(404).json({ status: 'fail', message: 'Order not found' });
         }
         return res.status(200).json({ status: 'success', data: { order } });
@@ -2120,13 +2532,48 @@ router.put('/orders/:orderId/status', async (req, res) => {
             });
         }
 
-        const order = await prisma.order.update({
-            where: { id: req.params.orderId },
-            data: { status: resolvedStatus, updatedAt: new Date() }
-        }).catch(() => null);
+        const order = await prisma.$transaction(async (tx) => {
+            const existingOrder = await tx.order.findUnique({
+                where: { id: req.params.orderId },
+                select: { id: true, status: true },
+            });
+            if (!existingOrder) return null;
+
+            const nextOrder = await tx.order.update({
+                where: { id: req.params.orderId },
+                data: { status: resolvedStatus, updatedAt: new Date(), updatedBy: req.user.id }
+            });
+
+            if (resolvedStatus === 'cancelled' && existingOrder.status !== 'cancelled') {
+                await restockOrderInventoryForCancellation({
+                    tx,
+                    orderId: req.params.orderId,
+                    actorUserId: req.user.id,
+                });
+                await tx.orderCancellationReason.upsert({
+                    where: { orderId: req.params.orderId },
+                    update: {
+                        reasonCode: String(req.body?.reasonCode || 'admin_cancelled'),
+                        reasonText: String(req.body?.reason || req.body?.notes || '').trim() || null,
+                        cancelledByUserId: req.user.id,
+                        cancelledByRole: req.user.role,
+                        metadata: { source: 'admin.orders.status' },
+                    },
+                    create: {
+                        orderId: req.params.orderId,
+                        reasonCode: String(req.body?.reasonCode || 'admin_cancelled'),
+                        reasonText: String(req.body?.reason || req.body?.notes || '').trim() || null,
+                        cancelledByUserId: req.user.id,
+                        cancelledByRole: req.user.role,
+                        metadata: { source: 'admin.orders.status' },
+                    },
+                });
+            }
+
+            return nextOrder;
+        });
 
         if (!order) {
-            if (allowTestFallbacksAdmin) return res.status(200).json({ status: 'success', message: 'Status updated' });
             return res.status(404).json({ status: 'fail', message: 'Order not found' });
         }
         return res.status(200).json({ status: 'success', data: { order } });
@@ -2139,13 +2586,49 @@ router.put('/orders/:orderId/status', async (req, res) => {
 // Admin: cancel order
 router.post('/orders/:orderId/cancel', async (req, res) => {
     try {
-        const order = await prisma.order.update({
-            where: { id: req.params.orderId },
-            data: { status: 'cancelled', updatedAt: new Date() }
-        }).catch(() => null);
+        const order = await prisma.$transaction(async (tx) => {
+            const existingOrder = await tx.order.findUnique({
+                where: { id: req.params.orderId },
+                select: { id: true, status: true },
+            });
+            if (!existingOrder) return null;
+
+            const nextOrder = await tx.order.update({
+                where: { id: req.params.orderId },
+                data: { status: 'cancelled', updatedAt: new Date(), updatedBy: req.user.id }
+            });
+
+            if (existingOrder.status !== 'cancelled') {
+                await restockOrderInventoryForCancellation({
+                    tx,
+                    orderId: req.params.orderId,
+                    actorUserId: req.user.id,
+                });
+            }
+
+            await tx.orderCancellationReason.upsert({
+                where: { orderId: req.params.orderId },
+                update: {
+                    reasonCode: String(req.body?.reasonCode || 'admin_cancelled'),
+                    reasonText: String(req.body?.reason || req.body?.notes || '').trim() || null,
+                    cancelledByUserId: req.user.id,
+                    cancelledByRole: req.user.role,
+                    metadata: { source: 'admin.orders.cancel' },
+                },
+                create: {
+                    orderId: req.params.orderId,
+                    reasonCode: String(req.body?.reasonCode || 'admin_cancelled'),
+                    reasonText: String(req.body?.reason || req.body?.notes || '').trim() || null,
+                    cancelledByUserId: req.user.id,
+                    cancelledByRole: req.user.role,
+                    metadata: { source: 'admin.orders.cancel' },
+                },
+            });
+
+            return nextOrder;
+        });
 
         if (!order) {
-            if (allowTestFallbacksAdmin) return res.status(200).json({ status: 'success', message: 'Order cancelled' });
             return res.status(404).json({ status: 'fail', message: 'Order not found' });
         }
         return res.status(200).json({ status: 'success', data: { order }, message: 'Order cancelled' });

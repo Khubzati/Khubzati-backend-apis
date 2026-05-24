@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Base URL
-BASE_URL="http://localhost:3000"
+BASE_URL="http://localhost:3000/v1"
 
 # Colors for output
 GREEN='\033[0;32m'

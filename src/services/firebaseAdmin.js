@@ -29,6 +29,11 @@ const initializeFirebaseAdmin = () => {
     if (admin.apps.length === 0) {
       let credential;
 
+      const hasEnvCredentials =
+        process.env.FIREBASE_PROJECT_ID &&
+        process.env.FIREBASE_PRIVATE_KEY &&
+        process.env.FIREBASE_CLIENT_EMAIL;
+
       // Method 1: Load from JSON file (easier for local development)
       if (process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
         const serviceAccountPath = path.resolve(process.env.FIREBASE_SERVICE_ACCOUNT_PATH);
@@ -36,22 +41,31 @@ const initializeFirebaseAdmin = () => {
         if (!fs.existsSync(serviceAccountPath)) {
           console.error(`❌ Firebase service account file not found: ${serviceAccountPath}`);
           console.error('   Please check FIREBASE_SERVICE_ACCOUNT_PATH in your .env file');
-          return null;
-        }
-
-        try {
-          const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
-          credential = admin.credential.cert(serviceAccount);
-          console.log('✅ Firebase Admin SDK initialized from JSON file');
-          console.log(`   File: ${serviceAccountPath}`);
-          console.log(`   Project ID: ${serviceAccount.project_id}`);
-        } catch (fileError) {
-          console.error('❌ Error reading Firebase service account file:', fileError.message);
-          return null;
+          if (hasEnvCredentials) {
+            console.warn('   Falling back to FIREBASE_PROJECT_ID/FIREBASE_PRIVATE_KEY/FIREBASE_CLIENT_EMAIL');
+          } else {
+            return null;
+          }
+        } else {
+          try {
+            const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
+            credential = admin.credential.cert(serviceAccount);
+            console.log('✅ Firebase Admin SDK initialized from JSON file');
+            console.log(`   File: ${serviceAccountPath}`);
+            console.log(`   Project ID: ${serviceAccount.project_id}`);
+          } catch (fileError) {
+            console.error('❌ Error reading Firebase service account file:', fileError.message);
+            if (hasEnvCredentials) {
+              console.warn('   Falling back to FIREBASE_PROJECT_ID/FIREBASE_PRIVATE_KEY/FIREBASE_CLIENT_EMAIL');
+            } else {
+              return null;
+            }
+          }
         }
       }
+
       // Method 2: Load from environment variables (for production)
-      else if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL) {
+      if (!credential && hasEnvCredentials) {
         const serviceAccount = {
           projectId: process.env.FIREBASE_PROJECT_ID,
           privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
@@ -63,7 +77,7 @@ const initializeFirebaseAdmin = () => {
         console.log(`   Project ID: ${process.env.FIREBASE_PROJECT_ID}`);
       }
       // No configuration found
-      else {
+      if (!credential) {
         console.warn('⚠️  Firebase Admin SDK credentials not configured.');
         console.warn('');
         console.warn('   Option 1 (Recommended for local dev): Set FIREBASE_SERVICE_ACCOUNT_PATH in .env');
