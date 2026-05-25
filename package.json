@@ -5,7 +5,8 @@
   "main": "app.js",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
+    "postinstall": "prisma generate",
     "start": "node ./src/app.js",
     "start:kpi-worker": "node ./src/workers/kpi-worker.js",
     "start:kpi-worker:dev": "nodemon ./src/workers/kpi-worker.js --watch src",
@@ -27,6 +28,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@prisma/client": "^6.8.2",
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.49.9",
     "@types/node": "^20.11.19",
@@ -53,7 +55,6 @@
     "twilio": "^5.13.1"
   },
   "devDependencies": {
-    "@prisma/client": "^6.8.2",
     "@types/jsonwebtoken": "^9.0.9",
     "@types/supertest": "^2.0.16",
     "eslint": "^8.57.1",
