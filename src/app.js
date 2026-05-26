@@ -71,9 +71,15 @@ if (isProduction && stubsRequested) {
 // Stubs are opt-in outside production only.
 const enableStubs = stubsRequested && !isProduction;
 
+const normalizeOriginValue = (value) =>
+  String(value || '')
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '')
+    .replace(/\/+$/, '');
+
 const configuredCorsOrigins = String(process.env.CORS_ORIGINS || '')
   .split(',')
-  .map((origin) => origin.trim())
+  .map((origin) => normalizeOriginValue(origin))
   .filter(Boolean);
 
 const devCorsOriginPattern =
@@ -124,15 +130,18 @@ app.use(
       // Allow server-to-server calls and native mobile apps without Origin header.
       if (!origin) return callback(null, true);
 
-      if (configuredCorsOrigins.includes(origin)) {
+      const normalizedOrigin = normalizeOriginValue(origin);
+
+      if (configuredCorsOrigins.includes(normalizedOrigin)) {
         return callback(null, true);
       }
 
-      if (!isProduction && devCorsOriginPattern.test(origin)) {
+      if (!isProduction && devCorsOriginPattern.test(normalizedOrigin)) {
         return callback(null, true);
       }
 
-      return callback(new Error('Origin not allowed by CORS'));
+      // Do not throw here; returning false prevents CORS headers without causing a 500.
+      return callback(null, false);
     },
     credentials: true,
     optionsSuccessStatus: 204,
