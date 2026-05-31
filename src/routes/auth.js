@@ -265,7 +265,9 @@ const findUserByIdentifiers = async (
       }
 
       if (role) {
-        conditions.push(`"role" = $${paramIndex}::"UserRole"`);
+        // Avoid hard-casting to a Prisma enum type name here because some
+        // production databases may use a different enum/text representation.
+        conditions.push(`"role" = $${paramIndex}`);
         params.push(role);
       }
 
