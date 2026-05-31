@@ -572,8 +572,12 @@ const findUserByIdentifiers = async (
             }
           }
 
-          // If still not found, try normalized search on ALL users
-          if (!user && normalizedInput.length >= 7) {
+          // If still not found, try normalized search on ALL users.
+          // This fallback is intentionally disabled in production because
+          // it can become very slow on large datasets.
+          const allowFullUserScan =
+            String(process.env.NODE_ENV || '').toLowerCase() !== 'production';
+          if (!user && normalizedInput.length >= 7 && allowFullUserScan) {
             console.log(`[DEBUG] Trying normalized search for: ${normalizedInput}`);
             try {
           // Get ALL users with phone numbers (no limit for comprehensive search)
