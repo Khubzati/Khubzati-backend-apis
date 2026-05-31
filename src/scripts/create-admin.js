@@ -62,6 +62,16 @@ async function createAdminUser() {
                 hasUpdates = true;
             }
 
+            if (existingAdmin.deletedAt) {
+                updateData.deletedAt = null;
+                hasUpdates = true;
+            }
+
+            if (existingAdmin.isVerified !== true) {
+                updateData.isVerified = true;
+                hasUpdates = true;
+            }
+
             if (shouldResetPassword) {
                 console.log('ADMIN_RESET_PASSWORD=true detected, resetting admin password...');
                 const salt = await bcrypt.genSalt(10);
