@@ -828,7 +828,16 @@ const countRecentFailedOtpAttempts = async ({ userId = null, identifier = null }
     return 0;
   }
 
-  return prisma.userSecurityEvent.count({ where });
+  try {
+    return await prisma.userSecurityEvent.count({ where });
+  } catch (error) {
+    // Security-event telemetry must not block OTP verification.
+    console.warn(
+      'Failed to count recent failed OTP attempts, continuing without cap check:',
+      error?.message || error
+    );
+    return 0;
+  }
 };
 
 const resolveVendorStatusForUser = async (user) => {
@@ -928,8 +937,23 @@ const resolveVendorStatusForUser = async (user) => {
     };
   };
 
-  if (user.role === 'bakery_owner') {
-    const bakeries = await prisma.bakery.findMany({
+  try {
+    if (user.role === 'bakery_owner') {
+      const bakeries = await prisma.bakery.findMany({
+        where: vendorOwnershipWhere,
+        select: {
+          id: true,
+          status: true,
+          rejectionReason: true,
+          rejectedAt: true,
+        },
+        orderBy: { updatedAt: 'desc' },
+      });
+
+      return deriveVendorStatusFromRecords(bakeries, 'bakery');
+    }
+
+    const restaurants = await prisma.restaurant.findMany({
       where: vendorOwnershipWhere,
       select: {
         id: true,
@@ -940,21 +964,24 @@ const resolveVendorStatusForUser = async (user) => {
       orderBy: { updatedAt: 'desc' },
     });
 
-    return deriveVendorStatusFromRecords(bakeries, 'bakery');
+    return deriveVendorStatusFromRecords(restaurants, 'restaurant');
+  } catch (error) {
+    // Vendor status lookup is helpful metadata; it should never break auth.
+    console.warn(
+      `Failed to resolve vendor status for user ${user.id}, returning safe fallback:`,
+      error?.message || error
+    );
+    return {
+      hasVendor: false,
+      vendorApproved: false,
+      vendorPending: false,
+      vendorRejected: false,
+      vendorType: user.role === 'bakery_owner' ? 'bakery' : 'restaurant',
+      vendorId: null,
+      rejectionReason: null,
+      rejectedAt: null,
+    };
   }
-
-  const restaurants = await prisma.restaurant.findMany({
-    where: vendorOwnershipWhere,
-    select: {
-      id: true,
-      status: true,
-      rejectionReason: true,
-      rejectedAt: true,
-    },
-    orderBy: { updatedAt: 'desc' },
-  });
-
-  return deriveVendorStatusFromRecords(restaurants, 'restaurant');
 };
 
 const ensureRestaurantProfileForOwner = async (user, registrationSeed = {}) => {
@@ -1991,6 +2018,9 @@ router.post('/verify-otp', otpRouteLimiter, async (req, res) => {
     return res.status(500).json({
       status: 'error',
       message: 'An error occurred while verifying OTP',
+      ...(process.env.NODE_ENV !== 'production' && {
+        error: error?.message || String(error),
+      }),
     });
   }
 });
