@@ -3,7 +3,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const prisma = require('../lib/prisma');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateTokenOptional } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rate-limit');
 const { logUploadAudit } = require('../services/uploadAuditService');
 
@@ -239,8 +239,22 @@ const uploadImageOnly = multer({
 });
 
 const resolveUploadOwnership = async (req) => {
-  const ownerType = String(req.body?.ownerType || req.body?.owner_type || 'user').trim().toLowerCase();
+  const isAuthenticated = Boolean(req.user?.id);
+  const defaultOwnerType = isAuthenticated ? 'user' : 'anonymous';
+  const ownerType = String(req.body?.ownerType || req.body?.owner_type || defaultOwnerType).trim().toLowerCase();
   const ownerId = String(req.body?.ownerId || req.body?.owner_id || req.user?.id || '').trim();
+
+  if (!isAuthenticated) {
+    if (ownerType === 'bakery' || ownerType === 'restaurant') {
+      return {
+        valid: false,
+        message: 'Authentication is required for bakery or restaurant ownership uploads',
+      };
+    }
+
+    // Registration and onboarding flows can upload documents before login.
+    return { valid: true, ownerType: 'anonymous', ownerId: null };
+  }
 
   if (!ownerId) {
     return { valid: false, message: 'ownerId is required for upload ownership validation' };
@@ -291,7 +305,7 @@ const resolveUploadOwnership = async (req) => {
 };
 
 // Upload single file
-router.post('/document', authenticateToken, uploadRateLimiter, upload.single('file'), async (req, res) => {
+router.post('/document', authenticateTokenOptional, uploadRateLimiter, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -319,7 +333,7 @@ router.post('/document', authenticateToken, uploadRateLimiter, upload.single('fi
     await logUploadAudit({
       prisma,
       req,
-      userId: req.user.id,
+      userId: req.user?.id || null,
       ownerType: ownership.ownerType,
       ownerId: ownership.ownerId,
       fileName: req.file.originalname,
@@ -358,7 +372,7 @@ router.post('/document', authenticateToken, uploadRateLimiter, upload.single('fi
 });
 
 // Upload single image only (for UI image selectors such as bread type thumbnails)
-router.post('/image', authenticateToken, uploadRateLimiter, uploadImageOnly.single('file'), async (req, res) => {
+router.post('/image', authenticateTokenOptional, uploadRateLimiter, uploadImageOnly.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -383,7 +397,7 @@ router.post('/image', authenticateToken, uploadRateLimiter, uploadImageOnly.sing
     await logUploadAudit({
       prisma,
       req,
-      userId: req.user.id,
+      userId: req.user?.id || null,
       ownerType: ownership.ownerType,
       ownerId: ownership.ownerId,
       fileName: req.file.originalname,
@@ -421,7 +435,7 @@ router.post('/image', authenticateToken, uploadRateLimiter, uploadImageOnly.sing
 });
 
 // Upload multiple files
-router.post('/documents', authenticateToken, uploadRateLimiter, upload.array('files', 5), async (req, res) => {
+router.post('/documents', authenticateTokenOptional, uploadRateLimiter, upload.array('files', 5), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({
@@ -455,7 +469,7 @@ router.post('/documents', authenticateToken, uploadRateLimiter, upload.array('fi
       await logUploadAudit({
         prisma,
         req,
-        userId: req.user.id,
+        userId: req.user?.id || null,
         ownerType: ownership.ownerType,
         ownerId: ownership.ownerId,
         fileName: file.originalname,
