@@ -225,6 +225,9 @@ const findUserByIdentifiers = async (
   preferredRole = null
 ) => {
   try {
+    const isProductionEnvironment =
+      String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+
     const isPhoneColumnMissingError = (error) =>
       error?.code === 'P2022' &&
       typeof error?.meta?.column === 'string' &&
@@ -406,7 +409,7 @@ const findUserByIdentifiers = async (
             allowRoleFallback: !normalizedPreferredRole,
             includeDeleted: false,
           });
-          if (!user) {
+          if (!user && !isProductionEnvironment) {
             user = await findUserByPhoneWithRolePriority(phoneToCheck, {
               allowRoleFallback: !normalizedPreferredRole,
               includeDeleted: true,
@@ -419,7 +422,7 @@ const findUserByIdentifiers = async (
           allowRoleFallback: !normalizedPreferredRole,
           includeDeleted: false,
         });
-        if (!user) {
+        if (!user && !isProductionEnvironment) {
           user = await findUserByPhoneWithRolePriority(phoneToCheck, {
             allowRoleFallback: !normalizedPreferredRole,
             includeDeleted: true,
@@ -498,7 +501,30 @@ const findUserByIdentifiers = async (
           const uniqueVariations = [...new Set(phoneVariations)];
           console.log(`[DEBUG] Trying ${uniqueVariations.length} phone variations:`, uniqueVariations.slice(0, 5));
 
-          if (normalizedPreferredRole) {
+          if (isProductionEnvironment && !user) {
+            // Production fast path: use batched IN queries to avoid slow
+            // sequential lookups when credentials are invalid.
+            const batchedVariations = uniqueVariations.slice(0, 8);
+            if (normalizedPreferredRole) {
+              user = await prisma.user.findFirst({
+                where: {
+                  deletedAt: null,
+                  role: normalizedPreferredRole,
+                  phoneNumber: { in: batchedVariations },
+                },
+              });
+            }
+            if (!user) {
+              user = await prisma.user.findFirst({
+                where: {
+                  deletedAt: null,
+                  phoneNumber: { in: batchedVariations },
+                },
+              });
+            }
+          }
+
+          if (!user && normalizedPreferredRole && !isProductionEnvironment) {
             // Pass 1: requested role + active accounts only.
             for (const variation of uniqueVariations) {
               if (variation === phoneToCheck && user) continue; // Already tried
@@ -517,7 +543,7 @@ const findUserByIdentifiers = async (
             }
           }
 
-          if (!user) {
+          if (!user && !isProductionEnvironment) {
             // Pass 2: any role, active accounts only.
             for (const variation of uniqueVariations) {
               if (variation === phoneToCheck && user) continue; // Already tried
@@ -534,7 +560,7 @@ const findUserByIdentifiers = async (
             }
           }
 
-          if (!user && normalizedPreferredRole) {
+          if (!user && normalizedPreferredRole && !isProductionEnvironment) {
             // Pass 3: requested role, including deleted accounts.
             for (const variation of uniqueVariations) {
               if (variation === phoneToCheck && user) continue; // Already tried
@@ -553,7 +579,7 @@ const findUserByIdentifiers = async (
             }
           }
 
-          if (!user) {
+          if (!user && !isProductionEnvironment) {
             // Pass 4: any role, including deleted accounts.
             for (const variation of uniqueVariations) {
               if (variation === phoneToCheck && user) continue; // Already tried
@@ -575,8 +601,7 @@ const findUserByIdentifiers = async (
           // If still not found, try normalized search on ALL users.
           // This fallback is intentionally disabled in production because
           // it can become very slow on large datasets.
-          const allowFullUserScan =
-            String(process.env.NODE_ENV || '').toLowerCase() !== 'production';
+          const allowFullUserScan = !isProductionEnvironment;
           if (!user && normalizedInput.length >= 7 && allowFullUserScan) {
             console.log(`[DEBUG] Trying normalized search for: ${normalizedInput}`);
             try {
