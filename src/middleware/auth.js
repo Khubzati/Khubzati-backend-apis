@@ -58,6 +58,11 @@ const verifyTokenWithRotation = (token) => {
 // Middleware to authenticate JWT token
 const authenticateToken = (req, res, next) => {
   try {
+    // Let CORS preflight requests pass before auth checks.
+    if (req.method === 'OPTIONS') {
+      return next();
+    }
+
     // Get token from Authorization header
     const authHeader = req.headers.authorization;
     const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN format
@@ -128,6 +133,10 @@ const authenticateTokenOptional = (req, _res, next) => {
 // Middleware to check user role
 const authorizeRole = (roles) => {
   return (req, res, next) => {
+    if (req.method === 'OPTIONS') {
+      return next();
+    }
+
     if (!req.user) {
       return res.status(401).json({
         status: 'fail',
