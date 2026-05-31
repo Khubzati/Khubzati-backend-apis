@@ -54,6 +54,136 @@ const otpRouteLimiter = createRateLimiter({
   message: 'Too many OTP requests. Please try again later.',
 });
 
+const isPrismaMissingTableError = (error, tableName) =>
+  error?.code === 'P2021' &&
+  typeof error?.meta?.table === 'string' &&
+  error.meta.table.includes(tableName);
+
+const isAuthInfraTableError = (error) =>
+  isPrismaMissingTableError(error, 'audit_logs') ||
+  isPrismaMissingTableError(error, 'user_security_events') ||
+  isPrismaMissingTableError(error, 'device_tokens');
+
+let authInfraEnsured = false;
+let authInfraEnsurePromise = null;
+
+const ensureAuthInfraTables = async ({ force = false } = {}) => {
+  if (authInfraEnsured && !force) return true;
+  if (authInfraEnsurePromise && !force) return authInfraEnsurePromise;
+
+  const ensureTask = (async () => {
+    try {
+      // Keep this narrowly scoped to auth-related operational tables
+      // so OTP/login can proceed even when a deployment missed a migration.
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "audit_logs" (
+          "id" TEXT NOT NULL,
+          "actor_user_id" TEXT,
+          "actor_role" TEXT,
+          "action" TEXT NOT NULL,
+          "entity_type" TEXT NOT NULL,
+          "entity_id" TEXT,
+          "request_id" TEXT,
+          "metadata" JSONB,
+          "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT "audit_logs_pkey" PRIMARY KEY ("id")
+        )
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS "audit_logs_actor_user_id_created_at_idx"
+        ON "audit_logs"("actor_user_id", "created_at")
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS "audit_logs_entity_type_entity_id_created_at_idx"
+        ON "audit_logs"("entity_type", "entity_id", "created_at")
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS "audit_logs_action_created_at_idx"
+        ON "audit_logs"("action", "created_at")
+      `);
+
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "user_security_events" (
+          "id" TEXT NOT NULL,
+          "user_id" TEXT,
+          "event_type" TEXT NOT NULL,
+          "status" TEXT NOT NULL DEFAULT 'recorded',
+          "identifier" TEXT,
+          "ip_address" TEXT,
+          "user_agent" TEXT,
+          "request_id" TEXT,
+          "metadata" JSONB,
+          "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT "user_security_events_pkey" PRIMARY KEY ("id")
+        )
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS "user_security_events_user_id_created_at_idx"
+        ON "user_security_events"("user_id", "created_at")
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS "user_security_events_event_type_created_at_idx"
+        ON "user_security_events"("event_type", "created_at")
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS "user_security_events_identifier_created_at_idx"
+        ON "user_security_events"("identifier", "created_at")
+      `);
+
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "device_tokens" (
+          "id" TEXT NOT NULL,
+          "user_id" TEXT NOT NULL,
+          "token" TEXT NOT NULL,
+          "platform" TEXT,
+          "last_used" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updated_at" TIMESTAMP(3),
+          CONSTRAINT "device_tokens_pkey" PRIMARY KEY ("id"),
+          CONSTRAINT "device_tokens_token_key" UNIQUE ("token")
+        )
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS "device_tokens_user_id_idx"
+        ON "device_tokens"("user_id")
+      `);
+
+      authInfraEnsured = true;
+      return true;
+    } catch (error) {
+      console.error('Failed to ensure auth infra tables:', error?.message || error);
+      return false;
+    } finally {
+      if (authInfraEnsurePromise === ensureTask) {
+        authInfraEnsurePromise = null;
+      }
+    }
+  })();
+
+  authInfraEnsurePromise = ensureTask;
+  return ensureTask;
+};
+
+const updateUserWithInfraRecovery = async ({ where, data }) => {
+  try {
+    return await prisma.user.update({ where, data });
+  } catch (error) {
+    if (!isAuthInfraTableError(error)) {
+      throw error;
+    }
+
+    console.warn(
+      'Auth user update failed due to missing infra table, attempting self-heal and retry:',
+      error?.meta?.table || error?.message || error
+    );
+    const healed = await ensureAuthInfraTables({ force: true });
+    if (!healed) {
+      throw error;
+    }
+    return prisma.user.update({ where, data });
+  }
+};
+
 const sanitizeUser = (user) => {
   const { password, otp, otpExpiry, ...userData } = user;
   return userData;
@@ -1620,7 +1750,7 @@ router.post('/login', otpRouteLimiter, async (req, res) => {
       }
     }
 
-    const updatedUser = await prisma.user.update({
+    const updatedUser = await updateUserWithInfraRecovery({
       where: { id: user.id },
       data: {
         otp: null,
@@ -1689,6 +1819,14 @@ router.post('/login', otpRouteLimiter, async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error);
+    if (isAuthInfraTableError(error)) {
+      return res.status(503).json({
+        status: 'fail',
+        message:
+          'Server setup is incomplete (missing auth infrastructure tables). Please apply latest database migrations.',
+        code: 'AUTH_INFRA_MISSING_TABLES',
+      });
+    }
     return res.status(500).json({
       status: 'error',
       message: 'An error occurred during login',
@@ -1964,7 +2102,7 @@ router.post('/verify-otp', otpRouteLimiter, async (req, res) => {
       updateData.isVerified = true;
     }
 
-    const updatedUser = await prisma.user.update({
+    const updatedUser = await updateUserWithInfraRecovery({
       where: { id: user.id },
       data: updateData,
     });
@@ -2015,6 +2153,14 @@ router.post('/verify-otp', otpRouteLimiter, async (req, res) => {
     });
   } catch (error) {
     console.error('Verify OTP error:', error);
+    if (isAuthInfraTableError(error)) {
+      return res.status(503).json({
+        status: 'fail',
+        message:
+          'Server setup is incomplete (missing auth infrastructure tables). Please apply latest database migrations.',
+        code: 'AUTH_INFRA_MISSING_TABLES',
+      });
+    }
     return res.status(500).json({
       status: 'error',
       message: 'An error occurred while verifying OTP',
