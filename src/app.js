@@ -136,7 +136,9 @@ app.use(
         return callback(null, true);
       }
 
-      if (!isProduction && devCorsOriginPattern.test(normalizedOrigin)) {
+      // Always allow loopback origins to support local admin/front-end development
+      // against remote environments (e.g. Railway production APIs).
+      if (devCorsOriginPattern.test(normalizedOrigin)) {
         return callback(null, true);
       }
 

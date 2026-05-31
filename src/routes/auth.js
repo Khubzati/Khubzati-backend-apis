@@ -15,6 +15,7 @@ const redis =
   redisUrl && typeof redisUrl === 'string' && redisUrl.length > 0
     ? new Redis(redisUrl)
     : null;
+let hasLoggedRedisLimiterFallback = false;
 
 const router = express.Router();
 
@@ -59,13 +60,27 @@ const isPrismaMissingTableError = (error, tableName) =>
   typeof error?.meta?.table === 'string' &&
   error.meta.table.includes(tableName);
 
+const isPrismaMissingColumnError = (error, tableName, columnName) =>
+  error?.code === 'P2022' &&
+  typeof error?.meta?.column === 'string' &&
+  error.meta.column.includes(`${tableName}.${columnName}`);
+
+const isAuthUserColumnError = (error) =>
+  isPrismaMissingColumnError(error, 'users', 'otp') ||
+  isPrismaMissingColumnError(error, 'users', 'otp_expiry');
+
 const isAuthInfraTableError = (error) =>
   isPrismaMissingTableError(error, 'audit_logs') ||
   isPrismaMissingTableError(error, 'user_security_events') ||
   isPrismaMissingTableError(error, 'device_tokens');
 
+const isAuthRuntimeSchemaError = (error) =>
+  isAuthInfraTableError(error) || isAuthUserColumnError(error);
+
 let authInfraEnsured = false;
 let authInfraEnsurePromise = null;
+let authUserColumnsEnsured = false;
+let authUserColumnsEnsurePromise = null;
 
 const ensureAuthInfraTables = async ({ force = false } = {}) => {
   if (authInfraEnsured && !force) return true;
@@ -164,20 +179,53 @@ const ensureAuthInfraTables = async ({ force = false } = {}) => {
   return ensureTask;
 };
 
+const ensureAuthUserColumns = async ({ force = false } = {}) => {
+  if (authUserColumnsEnsured && !force) return true;
+  if (authUserColumnsEnsurePromise && !force) return authUserColumnsEnsurePromise;
+
+  const ensureTask = (async () => {
+    try {
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "users"
+        ADD COLUMN IF NOT EXISTS "otp" TEXT
+      `);
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "users"
+        ADD COLUMN IF NOT EXISTS "otp_expiry" TIMESTAMPTZ(3)
+      `);
+      authUserColumnsEnsured = true;
+      return true;
+    } catch (error) {
+      console.error('Failed to ensure auth user columns:', error?.message || error);
+      return false;
+    } finally {
+      if (authUserColumnsEnsurePromise === ensureTask) {
+        authUserColumnsEnsurePromise = null;
+      }
+    }
+  })();
+
+  authUserColumnsEnsurePromise = ensureTask;
+  return ensureTask;
+};
+
 const updateUserWithInfraRecovery = async ({ where, data }) => {
   try {
     return await prisma.user.update({ where, data });
   } catch (error) {
-    if (!isAuthInfraTableError(error)) {
+    if (!isAuthInfraTableError(error) && !isAuthUserColumnError(error)) {
       throw error;
     }
 
     console.warn(
-      'Auth user update failed due to missing infra table, attempting self-heal and retry:',
-      error?.meta?.table || error?.message || error
+      'Auth user update failed due to missing schema element, attempting self-heal and retry:',
+      error?.meta?.table || error?.meta?.column || error?.message || error
     );
-    const healed = await ensureAuthInfraTables({ force: true });
-    if (!healed) {
+    const [infraHealed, userColumnsHealed] = await Promise.all([
+      ensureAuthInfraTables({ force: true }),
+      ensureAuthUserColumns({ force: true }),
+    ]);
+    if (!infraHealed && !userColumnsHealed) {
       throw error;
     }
     return prisma.user.update({ where, data });
@@ -200,6 +248,30 @@ const resolveDeviceToken = (body = {}) =>
   body.pushToken ||
   body.push_token ||
   null;
+
+// Best-effort self-heal on startup and before auth requests so
+// OTP/login routes can keep working during partially-applied deploys.
+const ensureAuthRuntimeSchema = async ({ force = false } = {}) => {
+  const [infraReady, userColumnsReady] = await Promise.all([
+    ensureAuthInfraTables({ force }),
+    ensureAuthUserColumns({ force }),
+  ]);
+  return infraReady || userColumnsReady;
+};
+
+ensureAuthRuntimeSchema().catch(() => {});
+
+router.use(async (_req, _res, next) => {
+  try {
+    await ensureAuthRuntimeSchema();
+  } catch (error) {
+    console.warn(
+      'Auth runtime schema preflight failed, continuing request:',
+      error?.message || error
+    );
+  }
+  next();
+});
 
 const hasDeviceTokenModel = () =>
   !!prisma?.deviceToken &&
@@ -327,12 +399,22 @@ const canRequestOtp = async (key) => {
   if (!key) return false;
 
   if (redis) {
-    const redisKey = `otp:limiter:${key}`;
-    const count = await redis.incr(redisKey);
-    if (count === 1) {
-      await redis.pexpire(redisKey, WINDOW_MS);
+    try {
+      const redisKey = `otp:limiter:${key}`;
+      const count = await redis.incr(redisKey);
+      if (count === 1) {
+        await redis.pexpire(redisKey, WINDOW_MS);
+      }
+      return count <= MAX_ATTEMPTS;
+    } catch (error) {
+      if (!hasLoggedRedisLimiterFallback) {
+        hasLoggedRedisLimiterFallback = true;
+        console.warn(
+          '⚠️  Redis OTP limiter unavailable; falling back to in-memory limiter:',
+          error?.message || error
+        );
+      }
     }
-    return count <= MAX_ATTEMPTS;
   }
 
   const now = Date.now();
@@ -352,7 +434,8 @@ const findUserByIdentifiers = async (
   emailToCheck,
   usernameToCheck,
   phoneToCheck,
-  preferredRole = null
+  preferredRole = null,
+  _didRetryAfterSchemaHeal = false
 ) => {
   try {
     const isProductionEnvironment =
@@ -859,6 +942,18 @@ const findUserByIdentifiers = async (
 
     return user;
   } catch (error) {
+    if (isAuthUserColumnError(error) && !_didRetryAfterSchemaHeal) {
+      const healed = await ensureAuthUserColumns({ force: true });
+      if (healed) {
+        return findUserByIdentifiers(
+          emailToCheck,
+          usernameToCheck,
+          phoneToCheck,
+          preferredRole,
+          true
+        );
+      }
+    }
     console.error('Error in findUserByIdentifiers:', error);
     throw error;
   }
@@ -1819,11 +1914,11 @@ router.post('/login', otpRouteLimiter, async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error);
-    if (isAuthInfraTableError(error)) {
+    if (isAuthRuntimeSchemaError(error)) {
       return res.status(503).json({
         status: 'fail',
         message:
-          'Server setup is incomplete (missing auth infrastructure tables). Please apply latest database migrations.',
+          'Server setup is incomplete (missing auth schema elements). Please apply latest database migrations.',
         code: 'AUTH_INFRA_MISSING_TABLES',
       });
     }
@@ -2153,11 +2248,11 @@ router.post('/verify-otp', otpRouteLimiter, async (req, res) => {
     });
   } catch (error) {
     console.error('Verify OTP error:', error);
-    if (isAuthInfraTableError(error)) {
+    if (isAuthRuntimeSchemaError(error)) {
       return res.status(503).json({
         status: 'fail',
         message:
-          'Server setup is incomplete (missing auth infrastructure tables). Please apply latest database migrations.',
+          'Server setup is incomplete (missing auth schema elements). Please apply latest database migrations.',
         code: 'AUTH_INFRA_MISSING_TABLES',
       });
     }
