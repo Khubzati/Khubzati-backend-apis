@@ -472,6 +472,13 @@ router.post('/', authenticateToken, authorizeRole(['bakery_owner', 'admin']), as
       deliveryProvider
     } = req.body;
 
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'name is required',
+      });
+    }
+
     const normalizedAddressLine1 =
       typeof addressLine1 === 'string' && addressLine1.trim()
         ? addressLine1.trim()

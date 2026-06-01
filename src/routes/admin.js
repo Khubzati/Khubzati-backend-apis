@@ -1238,6 +1238,12 @@ router.put('/users/:id/suspend', async (req, res) => {
             message: 'User suspended successfully'
         });
     } catch (error) {
+        if (error?.code === 'P2025') {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
         console.error('Suspend user error:', error);
         return res.status(500).json({
             status: 'error',
@@ -1262,6 +1268,12 @@ router.put('/users/:id/activate', async (req, res) => {
             message: 'User activated successfully'
         });
     } catch (error) {
+        if (error?.code === 'P2025') {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
         console.error('Activate user error:', error);
         return res.status(500).json({
             status: 'error',
@@ -1596,6 +1608,12 @@ router.delete('/users/:id', async (req, res) => {
             message: 'User deleted successfully'
         });
     } catch (error) {
+        if (error?.code === 'P2025') {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'User not found'
+            });
+        }
         console.error('Delete user error:', error);
         return res.status(500).json({
             status: 'error',

@@ -1408,6 +1408,31 @@ router.post('/', authenticateToken, authorizeRole(['restaurant_owner', 'admin'])
       operatingHours
     } = req.body;
 
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'name is required',
+      });
+    }
+    if (!addressLine1 || !String(addressLine1).trim()) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'addressLine1 is required',
+      });
+    }
+    if (!city || !String(city).trim()) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'city is required',
+      });
+    }
+    if (!postalCode || !String(postalCode).trim()) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'postalCode is required',
+      });
+    }
+
     const resolvedLogoUrl = normalizeAssetUrl(logoUrl);
     const resolvedCoverImageUrl = resolveRestaurantCoverImageUrl({
       coverImageUrl,

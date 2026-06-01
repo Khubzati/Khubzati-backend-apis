@@ -9,6 +9,10 @@ const router = express.Router();
 
 const enableStubs = (process.env.ENABLE_STUB_RESPONSES || '').toLowerCase() === 'true';
 const allowTestFallbacks = false;
+const UUID_REGEX =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const isValidUuid = (value) =>
+    typeof value === 'string' && UUID_REGEX.test(value.trim());
 const isBakeryCurrencyColumnMissingError = (error) =>
     error?.code === 'P2022' &&
     typeof error?.meta?.column === 'string' &&
@@ -128,6 +132,21 @@ if (enableStubs || allowTestFallbacks) {
 const ensureBakeryOwner = async (req, res, next) => {
     try {
         if (req.user.role === 'admin') {
+            const requestedBakeryId = resolveRequestedBakeryId(req);
+            const adminBakery = await prisma.bakery.findFirst({
+                where: {
+                    ...(requestedBakeryId ? { id: requestedBakeryId } : {}),
+                    deletedAt: null,
+                },
+                orderBy: { updatedAt: 'desc' },
+            });
+            if (!adminBakery) {
+                return res.status(404).json({
+                    status: 'fail',
+                    message: 'No bakery found. Create a bakery first or pass a valid bakeryId.',
+                });
+            }
+            req.bakery = adminBakery;
             return next();
         }
 
@@ -895,6 +914,9 @@ router.get('/products', authenticateToken, authorizeRole(['bakery_owner', 'admin
 router.get('/products/:productId', authenticateToken, authorizeRole(['bakery_owner', 'admin']), ensureBakeryOwner, async (req, res) => {
     try {
         const { productId } = req.params;
+        if (!isValidUuid(productId)) {
+            return res.status(400).json({ status: 'fail', message: 'Invalid product id format' });
+        }
         const bakeryId = req.bakery?.id || req.query.bakeryId;
 
         if (!bakeryId && req.user.role !== 'admin') {
@@ -1369,10 +1391,23 @@ router.get('/categories', authenticateToken, authorizeRole(['bakery_owner', 'adm
 router.post('/categories', authenticateToken, authorizeRole(['bakery_owner', 'admin']), async (req, res) => {
     try {
         const { name, description, imageUrl, parentCategoryId } = req.body;
+        const normalizedName = typeof name === 'string' ? name.trim() : '';
+        if (!normalizedName) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'name is required',
+            });
+        }
+        if (parentCategoryId && !isValidUuid(parentCategoryId)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid parentCategoryId format',
+            });
+        }
 
         const category = await prisma.category.create({
             data: {
-                name,
+                name: normalizedName,
                 description,
                 imageUrl,
                 type: 'bakery',
@@ -1586,6 +1621,12 @@ router.get('/orders', authenticateToken, authorizeRole(['bakery_owner', 'admin']
 router.get('/orders/:orderId', authenticateToken, authorizeRole(['bakery_owner', 'admin']), ensureBakeryOwner, async (req, res) => {
     try {
         const { orderId } = req.params;
+        if (!isValidUuid(orderId)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid order id format',
+            });
+        }
         const bakeryId = req.bakery?.id || req.query.bakeryId;
 
         if (!bakeryId && req.user.role !== 'admin') {
@@ -1662,6 +1703,12 @@ router.get('/orders/:orderId', authenticateToken, authorizeRole(['bakery_owner',
 router.put('/orders/:orderId/status', authenticateToken, authorizeRole(['bakery_owner', 'admin']), ensureBakeryOwner, async (req, res) => {
     try {
         const { orderId } = req.params;
+        if (!isValidUuid(orderId)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid order id format',
+            });
+        }
         const { status, notes } = req.body;
         const bakeryId = req.bakery?.id || req.query.bakeryId;
         const resolvedStatus = resolveOrderStatus(status);
@@ -1922,6 +1969,12 @@ router.put('/orders/:orderId/status', authenticateToken, authorizeRole(['bakery_
 router.post('/orders/:orderId/assign-delivery', authenticateToken, authorizeRole(['bakery_owner', 'admin']), ensureBakeryOwner, async (req, res) => {
     try {
         const { orderId } = req.params;
+        if (!isValidUuid(orderId)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid order id format',
+            });
+        }
         const { delivery_person_id } = req.body;
 
         const order = await prisma.order.findUnique({
@@ -1955,6 +2008,12 @@ router.post('/orders/:orderId/assign-delivery', authenticateToken, authorizeRole
 router.post('/orders/:orderId/notify-customer', authenticateToken, authorizeRole(['bakery_owner', 'admin']), ensureBakeryOwner, async (req, res) => {
     try {
         const { orderId } = req.params;
+        if (!isValidUuid(orderId)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid order id format',
+            });
+        }
         const { message } = req.body;
 
         const order = await prisma.order.findUnique({
@@ -2000,6 +2059,12 @@ router.post('/orders/:orderId/notify-customer', authenticateToken, authorizeRole
 router.post('/orders/:orderId/generate-invoice', authenticateToken, authorizeRole(['bakery_owner', 'admin']), ensureBakeryOwner, async (req, res) => {
     try {
         const { orderId } = req.params;
+        if (!isValidUuid(orderId)) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid order id format',
+            });
+        }
 
         const order = await prisma.order.findUnique({
             where: { id: orderId },
