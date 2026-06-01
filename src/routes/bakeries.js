@@ -9,6 +9,39 @@ const uploadsDir = path.join(__dirname, '../../uploads');
 
 const enableStubs = (process.env.ENABLE_STUB_RESPONSES || '').toLowerCase() === 'true';
 const allowTestFallbacks = false;
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const isValidUuid = (value) =>
+  typeof value === 'string' && UUID_REGEX.test(value.trim());
+const isPrismaMissingColumnError = (error, tableName, columnName) =>
+  error?.code === 'P2022' &&
+  typeof error?.meta?.column === 'string' &&
+  error.meta.column.includes(`${tableName}.${columnName}`);
+const isBakeryDeliveryProviderColumnError = (error) =>
+  isPrismaMissingColumnError(error, 'bakeries', 'delivery_provider');
+
+let bakeryDeliveryProviderSupported;
+const supportsBakeryDeliveryProvider = async () => {
+  if (typeof bakeryDeliveryProviderSupported === 'boolean') {
+    return bakeryDeliveryProviderSupported;
+  }
+
+  try {
+    const result = await prisma.$queryRawUnsafe(`
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'bakeries'
+        AND column_name = 'delivery_provider'
+      LIMIT 1
+    `);
+    bakeryDeliveryProviderSupported = Array.isArray(result) && result.length > 0;
+  } catch (_) {
+    bakeryDeliveryProviderSupported = false;
+  }
+
+  return bakeryDeliveryProviderSupported;
+};
 
 function normalizePublicAssetUrl(req, rawUrl) {
   if (typeof rawUrl !== 'string') return null;
@@ -123,6 +156,7 @@ function serializeBakery(req, bakery) {
 
   return {
     ...bakery,
+    deliveryProvider: bakery.deliveryProvider || 'third_party',
     logoUrl,
     coverImageUrl,
     imageUrl: logoUrl || coverImageUrl || null,
@@ -206,36 +240,58 @@ router.get('/', async (req, res) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const [bakeries, totalCount] = await Promise.all([
-      prisma.bakery.findMany({
-        where: whereClause,
-        take: parseInt(limit),
-        skip,
-        orderBy: { name: 'asc' },
-        select: {
-          id: true,
-          name: true,
-          description: true,
-          addressLine1: true,
-          addressLine2: true,
-          city: true,
-          postalCode: true,
-          country: true,
-          phoneNumber: true,
-          email: true,
-          deliveryProvider: true,
-          logoUrl: true,
-          coverImageUrl: true,
-          operatingHours: true,
-          status: true,
-          averageRating: true,
-          reviewCount: true,
-          createdAt: true,
-          updatedAt: true
-        }
-      }),
-      prisma.bakery.count({ where: whereClause })
-    ]);
+    const baseSelect = {
+      id: true,
+      name: true,
+      description: true,
+      addressLine1: true,
+      addressLine2: true,
+      city: true,
+      postalCode: true,
+      country: true,
+      phoneNumber: true,
+      email: true,
+      logoUrl: true,
+      coverImageUrl: true,
+      operatingHours: true,
+      status: true,
+      averageRating: true,
+      reviewCount: true,
+      createdAt: true,
+      updatedAt: true,
+    };
+    const includeDeliveryProvider = await supportsBakeryDeliveryProvider();
+    const select = includeDeliveryProvider
+      ? { ...baseSelect, deliveryProvider: true }
+      : baseSelect;
+
+    let bakeries = [];
+    let totalCount = 0;
+    try {
+      [bakeries, totalCount] = await Promise.all([
+        prisma.bakery.findMany({
+          where: whereClause,
+          take: parseInt(limit),
+          skip,
+          orderBy: { name: 'asc' },
+          select,
+        }),
+        prisma.bakery.count({ where: whereClause }),
+      ]);
+    } catch (error) {
+      if (!isBakeryDeliveryProviderColumnError(error)) throw error;
+      bakeryDeliveryProviderSupported = false;
+      [bakeries, totalCount] = await Promise.all([
+        prisma.bakery.findMany({
+          where: whereClause,
+          take: parseInt(limit),
+          skip,
+          orderBy: { name: 'asc' },
+          select: baseSelect,
+        }),
+        prisma.bakery.count({ where: whereClause }),
+      ]);
+    }
 
     const serializedBakeries = bakeries.map((bakery) =>
       serializeBakery(req, bakery),
@@ -343,6 +399,12 @@ router.get('/bread-types', async (req, res) => {
 router.get('/:bakeryId', async (req, res) => {
   try {
     const { bakeryId } = req.params;
+    if (!allowTestFallbacks && bakeryId !== 'test-bakery-id' && !isValidUuid(bakeryId)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid bakery id format',
+      });
+    }
 
     const baseWhere = {
       id: bakeryId,
@@ -437,9 +499,7 @@ router.post('/', authenticateToken, authorizeRole(['bakery_owner', 'admin']), as
       });
     }
 
-    // Create new bakery
-    const bakery = await prisma.bakery.create({
-      data: {
+    const createData = {
         name,
         description,
         addressLine1: normalizedAddressLine1,
@@ -452,12 +512,16 @@ router.post('/', authenticateToken, authorizeRole(['bakery_owner', 'admin']), as
         ...bakeryAssetPayload,
         commercialRegistryUrl,
         operatingHours,
-        deliveryProvider: normalizedDeliveryProvider || 'third_party',
         status: 'pending_approval',
         ownerId: req.user.id,
         createdBy: req.user.id
-      }
-    });
+      };
+    if (await supportsBakeryDeliveryProvider()) {
+      createData.deliveryProvider = normalizedDeliveryProvider || 'third_party';
+    }
+
+    // Create new bakery
+    const bakery = await prisma.bakery.create({ data: createData });
 
     return res.status(201).json({
       status: 'success',
@@ -478,6 +542,12 @@ router.post('/', authenticateToken, authorizeRole(['bakery_owner', 'admin']), as
 router.put('/:bakeryId', authenticateToken, async (req, res) => {
   try {
     const { bakeryId } = req.params;
+    if (!isValidUuid(bakeryId)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid bakery id format',
+      });
+    }
     const {
       name,
       description,
@@ -545,9 +615,7 @@ router.put('/:bakeryId', authenticateToken, async (req, res) => {
       );
 
     // Update bakery
-    const updatedBakery = await prisma.bakery.update({
-      where: { id: bakeryId },
-      data: {
+    const updateData = {
         ...(name !== undefined && { name }),
         ...(description !== undefined && { description }),
         ...(addressLine1 !== undefined && { addressLine1 }),
@@ -560,9 +628,6 @@ router.put('/:bakeryId', authenticateToken, async (req, res) => {
         ...(normalizedCommercialRegistryUrl !== undefined && {
           commercialRegistryUrl: normalizedCommercialRegistryUrl,
         }),
-        ...(normalizedDeliveryProvider !== undefined && {
-          deliveryProvider: normalizedDeliveryProvider,
-        }),
         ...bakeryAssetPayload,
         ...(operatingHours !== undefined && { operatingHours }),
         ...(ownerResubmittedDocuments && {
@@ -571,8 +636,15 @@ router.put('/:bakeryId', authenticateToken, async (req, res) => {
           rejectedAt: null,
         }),
         updatedBy: req.user.id,
-        updatedAt: new Date()
-      }
+        updatedAt: new Date(),
+      };
+    if ((await supportsBakeryDeliveryProvider()) && normalizedDeliveryProvider !== undefined) {
+      updateData.deliveryProvider = normalizedDeliveryProvider;
+    }
+
+    const updatedBakery = await prisma.bakery.update({
+      where: { id: bakeryId },
+      data: updateData,
     });
 
     return res.status(200).json({
@@ -594,6 +666,12 @@ router.put('/:bakeryId', authenticateToken, async (req, res) => {
 router.get('/:bakeryId/products', async (req, res) => {
   try {
     const { bakeryId } = req.params;
+    if (!allowTestFallbacks && bakeryId !== 'test-bakery-id' && !isValidUuid(bakeryId)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid bakery id format',
+      });
+    }
     const { page = 1, limit = 10 } = req.query;
 
     // Check if bakery exists and is approved
@@ -660,6 +738,12 @@ router.get('/:bakeryId/products', async (req, res) => {
 router.get('/:bakeryId/reviews', async (req, res) => {
   try {
     const { bakeryId } = req.params;
+    if (!allowTestFallbacks && bakeryId !== 'test-bakery-id' && !isValidUuid(bakeryId)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid bakery id format',
+      });
+    }
     const { page = 1, limit = 10 } = req.query;
 
     // Check if bakery exists and is approved (unless test fallback)

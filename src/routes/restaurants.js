@@ -6,6 +6,10 @@ const { authenticateToken, authorizeRole } = require('../middleware/auth');
 
 const router = express.Router();
 const reportsDir = path.join(__dirname, '../../uploads');
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const isValidUuid = (value) =>
+  typeof value === 'string' && UUID_REGEX.test(value.trim());
 const successfulStatuses = new Set(['completed', 'delivered']);
 const processingStatuses = new Set([
   'confirmed',
@@ -1336,6 +1340,12 @@ router.put('/orders/:orderId/status', authenticateToken, authorizeRole(['restaur
 router.get('/:restaurantId', async (req, res) => {
   try {
     const { restaurantId } = req.params;
+    if (!isValidUuid(restaurantId)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid restaurant id format',
+      });
+    }
     
     const restaurant = await prisma.restaurant.findFirst({
       where: {
@@ -1554,6 +1564,12 @@ router.put('/:restaurantId', authenticateToken, async (req, res) => {
 router.get('/:restaurantId/products', async (req, res) => {
   try {
     const { restaurantId } = req.params;
+    if (!isValidUuid(restaurantId)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid restaurant id format',
+      });
+    }
     const { page = 1, limit = 10 } = req.query;
     
     // Check if restaurant exists and is approved
@@ -1619,6 +1635,12 @@ router.get('/:restaurantId/products', async (req, res) => {
 router.get('/:restaurantId/reviews', async (req, res) => {
   try {
     const { restaurantId } = req.params;
+    if (!isValidUuid(restaurantId)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid restaurant id format',
+      });
+    }
     const { page = 1, limit = 10 } = req.query;
     
     // Check if restaurant exists and is approved
