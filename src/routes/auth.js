@@ -1476,7 +1476,7 @@ router.post('/register', async (req, res) => {
       const generatedOtp = generateOtpCode();
       const otpExpiry = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
-      await prisma.user.update({
+      await updateUserWithInfraRecovery({
         where: { id: existingUser.id },
         data: {
           otp: generatedOtp,
@@ -1733,7 +1733,7 @@ router.post('/login', otpRouteLimiter, async (req, res) => {
       const generatedOtp = generateOtpCode();
       const otpExpiry = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
-      await prisma.user.update({
+      await updateUserWithInfraRecovery({
         where: { id: user.id },
         data: {
           otp: generatedOtp,
@@ -1997,7 +1997,7 @@ router.post('/resend-otp', otpRouteLimiter, async (req, res) => {
     const otp = generateOtpCode();
     const otpExpiry = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
-    await prisma.user.update({
+    await updateUserWithInfraRecovery({
       where: { id: user.id },
       data: {
         otp,
@@ -2343,7 +2343,7 @@ const handleRequestPasswordReset = async (req, res) => {
     const otpExpiry = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
     const verificationId = phoneToCheck || emailToCheck || usernameToCheck || user.phoneNumber || user.email;
 
-    await prisma.user.update({
+    await updateUserWithInfraRecovery({
       where: { id: user.id },
       data: {
         otp,
@@ -2436,7 +2436,7 @@ router.post('/reset-password', otpRouteLimiter, async (req, res) => {
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(String(newPassword), salt);
-    await prisma.user.update({
+    await updateUserWithInfraRecovery({
       where: { id: user.id },
       data: {
         password: hashedPassword,
@@ -2555,7 +2555,7 @@ router.post('/login-with-firebase', async (req, res) => {
     } else {
       // Update user if needed (e.g., mark as verified)
       if (!user.isVerified) {
-        user = await prisma.user.update({
+        user = await updateUserWithInfraRecovery({
           where: { id: user.id },
           data: { isVerified: true },
         });
