@@ -4,7 +4,7 @@ This log will document the manual testing process for the Khubzati API, covering
 
 ## Test Environment
 
-- API Server: Running locally on `http://localhost:3000` (assuming default port from `app.js` or `.env`)
+- API Server: Running locally on `https://api.khubzati.com` (assuming default port from `app.js` or `.env`)
 - Database: PostgreSQL (as configured in `config/config.json` and models)
 
 ## Testing Tools
@@ -26,7 +26,7 @@ This log will document the manual testing process for the Khubzati API, covering
 
 *   **Request:**
     *   Method: `POST`
-    *   URL: `http://localhost:3000/api/v1/auth/register`
+    *   URL: `https://api.khubzati.com/api/v1/auth/register`
     *   Headers: `Content-Type: application/json`, `Accept-Language: en`
     *   Body: `{"username": "testuser_en_02", "email": "testuser_en_02@example.com", "password": "Password123!", "phone_number": "1234567891", "role": "customer"}`
 *   **Expected Response (Status Code):** `201 Created`
@@ -69,7 +69,7 @@ This log will document the manual testing process for the Khubzati API, covering
 
 *   **Request:**
     *   Method: `POST`
-    *   URL: `http://localhost:3000/api/v1/auth/register`
+    *   URL: `https://api.khubzati.com/api/v1/auth/register`
     *   Headers: `Content-Type: application/json`, `Accept-Language: ar`
     *   Body: `{"username": "testuser_ar_01", "email": "testuser_ar_01@example.com", "password": "Password123!", "phone_number": "1234567892", "role": "customer"}`
 *   **Expected Response (Status Code):** `201 Created`
@@ -110,7 +110,7 @@ This log will document the manual testing process for the Khubzati API, covering
 
 *   **Request:**
     *   Method: `POST`
-    *   URL: `http://localhost:3000/api/v1/auth/login`
+    *   URL: `https://api.khubzati.com/api/v1/auth/login`
     *   Headers: `Content-Type: application/json`, `Accept-Language: en`
     *   Body: `{"email": "testuser_en_02@example.com", "password": "Password123!"}`
 *   **Expected Response (Status Code):** `200 OK`
@@ -149,7 +149,7 @@ This log will document the manual testing process for the Khubzati API, covering
 
 *   **Request:**
     *   Method: `POST`
-    *   URL: `http://localhost:3000/api/v1/auth/login`
+    *   URL: `https://api.khubzati.com/api/v1/auth/login`
     *   Headers: `Content-Type: application/json`, `Accept-Language: ar`
     *   Body: `{"email": "testuser_ar_01@example.com", "password": "Password123!"}`
 *   **Expected Response (Status Code):** `200 OK`
@@ -190,7 +190,7 @@ This log will document the manual testing process for the Khubzati API, covering
 
 *   **Request:**
     *   Method: `POST`
-    *   URL: `http://localhost:3000/api/v1/auth/logout`
+    *   URL: `https://api.khubzati.com/api/v1/auth/logout`
     *   Headers: `Authorization: Bearer <token_from_testuser_en_02_login>`, `Accept-Language: en`
 *   **Expected Response (Status Code):** `200 OK`
 *   **Expected Response (Body - English):** 

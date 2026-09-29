@@ -1,149 +1,155 @@
-const { DataTypes } = require("sequelize");
+'use strict';
+const sharedColumns = require('./shared-columns');
 
-module.exports = (sequelize) => {
-  const Order = sequelize.define("Order", {
-    order_id: {
-      type: DataTypes.INTEGER,
-      primaryKey: true,
-      autoIncrement: true,
-    },
-    user_id: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      references: {
-        model: "users",
-        key: "user_id",
+module.exports = (sequelize, DataTypes) => {
+  const Order = sequelize.define(
+    'Order',
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
       },
-    },
-    bakery_id: { // If order is from a specific bakery
-      type: DataTypes.INTEGER,
-      allowNull: true,
-      references: {
-        model: "bakeries",
-        key: "bakery_id",
-      },
-    },
-    restaurant_id: { // If order is from a specific restaurant
-      type: DataTypes.INTEGER,
-      allowNull: true,
-      references: {
-        model: "restaurants",
-        key: "restaurant_id",
-      },
-    },
-    delivery_address_id: { // Link to a user's address or store address snapshot
-      type: DataTypes.INTEGER,
-      allowNull: true, // May be null for pickup orders
-      references: {
-        model: "addresses",
-        key: "address_id",
-      },
-    },
-    // Or store address snapshot directly if addresses can change/be deleted
-    // shipping_address_snapshot: DataTypes.JSON, 
-    billing_address_id: {
-        type: DataTypes.INTEGER,
-        allowNull: true, 
-        references: {
-          model: "addresses",
-          key: "address_id",
-        },
-    },
-    // billing_address_snapshot: DataTypes.JSON,
-    total_amount: {
-      type: DataTypes.DECIMAL(10, 2),
-      allowNull: false,
-    },
-    sub_total: {
-        type: DataTypes.DECIMAL(10, 2),
+      userId: {
+        type: DataTypes.UUID,
+        field: 'user_id',
         allowNull: false,
-    },
-    delivery_fee: {
+        references: {
+          model: 'users',
+          key: 'id',
+        },
+      },
+      bakeryId: {
+        type: DataTypes.UUID,
+        field: 'bakery_id',
+        references: {
+          model: 'bakeries',
+          key: 'id',
+        },
+      },
+      restaurantId: {
+        type: DataTypes.UUID,
+        field: 'restaurant_id',
+        references: {
+          model: 'restaurants',
+          key: 'id',
+        },
+      },
+      orderNumber: {
+        type: DataTypes.STRING,
+        field: 'order_number',
+        allowNull: false,
+        unique: true,
+      },
+      status: {
+        type: DataTypes.ENUM(
+          'pending',
+          'confirmed',
+          'preparing',
+          'ready_for_pickup',
+          'out_for_delivery',
+          'delivered',
+          'completed',
+          'cancelled'
+        ),
+        defaultValue: 'pending',
+      },
+      orderType: {
+        type: DataTypes.ENUM('pickup', 'delivery'),
+        field: 'order_type',
+        allowNull: false,
+      },
+      deliveryAddressId: {
+        type: DataTypes.UUID,
+        field: 'delivery_address_id',
+        references: {
+          model: 'addresses',
+          key: 'id',
+        },
+      },
+      totalAmount: {
         type: DataTypes.DECIMAL(10, 2),
-        allowNull: true,
-        defaultValue: 0.00
+        field: 'total_amount',
+        allowNull: false,
+      },
+      paymentMethod: {
+        type: DataTypes.ENUM('credit_card', 'debit_card', 'cash_on_delivery', 'wallet'),
+        field: 'payment_method',
+        allowNull: false,
+      },
+      paymentStatus: {
+        type: DataTypes.ENUM('pending', 'paid', 'failed', 'refunded'),
+        field: 'payment_status',
+        defaultValue: 'pending',
+      },
+      specialInstructions: {
+        type: DataTypes.TEXT,
+        field: 'special_instructions',
+      },
+      estimatedDeliveryTime: {
+        type: DataTypes.DATE,
+        field: 'estimated_delivery_time',
+      },
+      actualDeliveryTime: {
+        type: DataTypes.DATE,
+        field: 'actual_delivery_time',
+      },
+      ...sharedColumns(sequelize, DataTypes),
     },
-    service_fee: {
-        type: DataTypes.DECIMAL(10, 2),
-        allowNull: true,
-        defaultValue: 0.00
-    },
-    discount_amount: {
-        type: DataTypes.DECIMAL(10, 2),
-        allowNull: true,
-        defaultValue: 0.00
-    },
-    payment_method: {
-      type: DataTypes.STRING, // e.g., "credit_card", "cash_on_delivery"
-      allowNull: true,
-    },
-    payment_status: {
-      type: DataTypes.ENUM("pending", "paid", "failed", "refunded"),
-      defaultValue: "pending",
-    },
-    order_status: {
-      type: DataTypes.ENUM(
-        "pending_confirmation", 
-        "confirmed", 
-        "preparing", 
-        "ready_for_pickup", 
-        "out_for_delivery", 
-        "delivered", 
-        "cancelled", 
-        "failed_delivery"
-      ),
-      defaultValue: "pending_confirmation",
-    },
-    special_instructions: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-    },
-    estimated_delivery_time: {
-      type: DataTypes.DATE,
-      allowNull: true,
-    },
-    actual_delivery_time: {
-      type: DataTypes.DATE,
-      allowNull: true,
-    },
-    // driver_id: { // Link to a Driver model if implemented
-    //   type: DataTypes.INTEGER,
-    //   allowNull: true,
-    // },
-  }, {
-    tableName: "orders",
-    timestamps: true, // Adds createdAt and updatedAt
-  });
+    {
+      tableName: 'orders',
+      validate: {
+        orderTypeValidation() {
+          if (this.orderType === 'delivery' && !this.deliveryAddressId) {
+            throw new Error('Delivery address is required for delivery orders');
+          }
+        },
+        establishmentValidation() {
+          if (!this.bakeryId && !this.restaurantId) {
+            throw new Error('Either bakery or restaurant ID must be provided');
+          }
+          if (this.bakeryId && this.restaurantId) {
+            throw new Error('Order cannot be associated with both bakery and restaurant');
+          }
+        },
+      },
+      hooks: {
+        beforeCreate: (order) => {
+          // Generate a unique order number
+          const timestamp = new Date().getTime();
+          const random = Math.floor(Math.random() * 1000);
+          order.orderNumber = `KHB-${timestamp}-${random}`;
+        },
+      },
+    }
+  );
 
   Order.associate = (models) => {
     Order.belongsTo(models.User, {
-      foreignKey: "user_id",
-      as: "customer"
+      foreignKey: 'userId',
+      as: 'user',
     });
+    
     Order.belongsTo(models.Bakery, {
-      foreignKey: "bakery_id",
-      as: "bakery"
+      foreignKey: 'bakeryId',
+      as: 'bakery',
     });
+    
     Order.belongsTo(models.Restaurant, {
-      foreignKey: "restaurant_id",
-      as: "restaurant"
+      foreignKey: 'restaurantId',
+      as: 'restaurant',
     });
+    
     Order.belongsTo(models.Address, {
-      foreignKey: "delivery_address_id",
-      as: "deliveryAddress"
+      foreignKey: 'deliveryAddressId',
+      as: 'deliveryAddress',
     });
-    Order.belongsTo(models.Address, {
-        foreignKey: "billing_address_id",
-        as: "billingAddress"
-      });
-    Order.hasMany(models.OrderItem, { // To be created
-      foreignKey: "order_id",
-      as: "items"
+    
+    Order.hasMany(models.OrderItem, {
+      foreignKey: 'orderId',
+      as: 'orderItems',
     });
-    // Order.hasOne(models.Payment, { foreignKey: 'order_id', as: 'payment' }); // To be created
-    // Order.hasMany(models.Review, { foreignKey: 'order_id', as: 'reviews' }); // If reviews are per order
   };
 
   return Order;
 };
-

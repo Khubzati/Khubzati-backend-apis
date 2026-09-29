@@ -1,84 +1,105 @@
-const { DataTypes } = require("sequelize");
+'use strict';
+const bcrypt = require('bcryptjs');
+const sharedColumns = require('./shared-columns');
 
-module.exports = (sequelize) => {
-  const User = sequelize.define("User", {
-    user_id: {
-      type: DataTypes.INTEGER, 
-      primaryKey: true,
-      autoIncrement: true,
-    },
-    username: {
-      type: DataTypes.STRING,
-      allowNull: false,
-      unique: true,
-    },
-    email: {
-      type: DataTypes.STRING,
-      allowNull: false,
-      unique: true,
-      validate: {
-        isEmail: true,
+module.exports = (sequelize, DataTypes) => {
+  const User = sequelize.define(
+    'User',
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
       },
-    },
-    password_hash: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    phone_number: {
-      type: DataTypes.STRING,
-      unique: true,
-      allowNull: true,
-    },
-    full_name: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
-    profile_picture_url: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
-    role: {
-      type: DataTypes.ENUM("customer", "bakery_owner", "restaurant_owner", "admin"),
-      allowNull: false,
-      defaultValue: "customer",
-    },
-    is_verified: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: false,
-    },
-    last_login: {
-      type: DataTypes.DATE,
-      allowNull: true,
-    },
-    // Fields for email verification and password reset tokens
-    emailVerificationToken: {
+      username: {
         type: DataTypes.STRING,
-        allowNull: true,
-    },
-    emailVerificationExpires: {
-        type: DataTypes.DATE,
-        allowNull: true,
-    },
-    passwordResetToken: {
+        allowNull: false,
+        unique: true,
+      },
+      email: {
         type: DataTypes.STRING,
-        allowNull: true,
+        allowNull: false,
+        unique: true,
+        validate: {
+          isEmail: true,
+        },
+      },
+      password: {
+        type: DataTypes.STRING,
+        allowNull: false,
+      },
+      fullName: {
+        type: DataTypes.STRING,
+        field: 'full_name',
+      },
+      phoneNumber: {
+        type: DataTypes.STRING,
+        field: 'phone_number',
+      },
+      role: {
+        type: DataTypes.ENUM('customer', 'bakery_owner', 'restaurant_owner', 'admin'),
+        defaultValue: 'customer',
+      },
+      isVerified: {
+        type: DataTypes.BOOLEAN,
+        field: 'is_verified',
+        defaultValue: false,
+      },
+      profilePictureUrl: {
+        type: DataTypes.STRING,
+        field: 'profile_picture_url',
+      },
+      ...sharedColumns(sequelize, DataTypes),
     },
-    passwordResetExpires: {
-        type: DataTypes.DATE,
-        allowNull: true,
+    {
+      tableName: 'users',
+      hooks: {
+        beforeCreate: async (user) => {
+          if (user.password) {
+            const salt = await bcrypt.genSalt(10);
+            user.password = await bcrypt.hash(user.password, salt);
+          }
+        },
+        beforeUpdate: async (user) => {
+          if (user.changed('password')) {
+            const salt = await bcrypt.genSalt(10);
+            user.password = await bcrypt.hash(user.password, salt);
+          }
+        },
+      },
     }
-  }, {
-    tableName: "users", 
-    timestamps: true, 
-  });
+  );
+
+  User.prototype.comparePassword = async function (candidatePassword) {
+    return bcrypt.compare(candidatePassword, this.password);
+  };
 
   User.associate = (models) => {
     User.hasMany(models.Address, {
-      foreignKey: "user_id",
-      as: "addresses" // Alias for the association
+      foreignKey: 'userId',
+      as: 'addresses',
+    });
+    
+    User.hasMany(models.Review, {
+      foreignKey: 'userId',
+      as: 'reviews',
+    });
+    
+    User.hasOne(models.Cart, {
+      foreignKey: 'userId',
+      as: 'cart',
+    });
+    
+    User.hasMany(models.Order, {
+      foreignKey: 'userId',
+      as: 'orders',
+    });
+    
+    User.hasMany(models.Notification, {
+      foreignKey: 'userId',
+      as: 'notifications',
     });
   };
 
   return User;
 };
-
