@@ -1,15 +1,20 @@
 const express = require('express');
+const { canTransitionOrder } = require('../utils/order-transition');
 const fs = require('fs');
 const path = require('path');
 const prisma = require('../lib/prisma');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
+const { resolveOrderStatus } = require('../utils/order-status');
 
 const router = express.Router();
+const { consumeOnboardingUploads } = require('../services/onboardingUploadService');
 const reportsDir = path.join(__dirname, '../../uploads');
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isValidUuid = (value) =>
   typeof value === 'string' && UUID_REGEX.test(value.trim());
+const hasOwn = (value, key) =>
+  Object.prototype.hasOwnProperty.call(value || {}, key);
 const successfulStatuses = new Set(['completed', 'delivered']);
 const processingStatuses = new Set([
   'confirmed',
@@ -36,6 +41,69 @@ const normalizeAssetUrl = (value) => {
   if (typeof value !== 'string') return value;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+};
+
+const normalizeOptionalText = (value) => {
+  if (value === null) return null;
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const parseNonNegativeNumber = (value) => {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+};
+
+const parseNonNegativeInteger = (value) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+};
+
+const parseBooleanValue = (value) => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    if (value.toLowerCase() === 'true') return true;
+    if (value.toLowerCase() === 'false') return false;
+  }
+  return undefined;
+};
+
+const resolveLegacyCategoryIdInput = (payload = {}) => {
+  const hasCamel = hasOwn(payload, 'categoryId');
+  const hasSnake = hasOwn(payload, 'category_id');
+
+  if (!hasCamel && !hasSnake) {
+    return { provided: false };
+  }
+
+  const rawCamel = hasCamel ? payload.categoryId : undefined;
+  const rawSnake = hasSnake ? payload.category_id : undefined;
+  const normalizedCamel =
+    rawCamel === null ? null : normalizeOptionalText(rawCamel);
+  const normalizedSnake =
+    rawSnake === null ? null : normalizeOptionalText(rawSnake);
+
+  if (
+    hasCamel &&
+    hasSnake &&
+    normalizedCamel !== undefined &&
+    normalizedSnake !== undefined &&
+    normalizedCamel !== normalizedSnake
+  ) {
+    return {
+      provided: true,
+      error: 'categoryId and category_id must match when both are provided',
+    };
+  }
+
+  return {
+    provided: true,
+    value:
+      normalizedCamel !== undefined ? normalizedCamel : normalizedSnake,
+    legacyFieldUsed: !hasCamel && hasSnake,
+  };
 };
 
 const resolveRestaurantCoverImageUrl = (payload = {}) => {
@@ -151,9 +219,18 @@ const buildExportCsv = ({ period, salesOverview, orderStatistics, popularItems }
   return rows.map((row) => row.map((item) => escapeCsv(item)).join(',')).join('\n');
 };
 
+const isWriteMethod = (method) => ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+
+// Returns null (same as "not found") for a non-approved vendor's write
+// attempt, so every existing `if (!restaurant) return res.status(404)...`
+// call site blocks the write without needing individual edits. Admins are
+// exempt so they can still manage/fix a non-approved vendor's data.
 const resolveManagedRestaurant = async (req) => {
   const requestedRestaurantId =
-    typeof req.query.restaurantId === 'string' &&
+    typeof req.headers['x-vendor-id'] === 'string' &&
+    req.headers['x-vendor-id'].trim().length > 0
+      ? req.headers['x-vendor-id'].trim()
+      : typeof req.query.restaurantId === 'string' &&
     req.query.restaurantId.trim().length > 0
       ? req.query.restaurantId.trim()
       : null;
@@ -174,7 +251,7 @@ const resolveManagedRestaurant = async (req) => {
     });
   }
 
-  return prisma.restaurant.findFirst({
+  const restaurant = await prisma.restaurant.findFirst({
     where: {
       ownerId: req.user.id,
       deletedAt: null,
@@ -182,6 +259,349 @@ const resolveManagedRestaurant = async (req) => {
     },
     orderBy: { updatedAt: 'desc' },
   });
+
+  if (restaurant && isWriteMethod(req.method) && restaurant.status !== 'approved') {
+    return null;
+  }
+
+  return restaurant;
+};
+
+const resolveRestaurantWriteAccess = async (req) => {
+  const requestedRestaurantId =
+    typeof req.headers['x-vendor-id'] === 'string' &&
+    req.headers['x-vendor-id'].trim().length > 0
+      ? req.headers['x-vendor-id'].trim()
+      : typeof req.query.restaurantId === 'string' &&
+    req.query.restaurantId.trim().length > 0
+      ? req.query.restaurantId.trim()
+      : null;
+
+  if (req.user.role === 'admin') {
+    const restaurant = await resolveManagedRestaurant(req);
+    if (!restaurant) {
+      return {
+        statusCode: 404,
+        body: {
+          status: 'fail',
+          message: requestedRestaurantId
+            ? 'Restaurant not found'
+            : 'No active restaurant profile found',
+        },
+      };
+    }
+
+    return { restaurant };
+  }
+
+  const restaurant = await prisma.restaurant.findFirst({
+    where: {
+      ownerId: req.user.id,
+      deletedAt: null,
+      ...(requestedRestaurantId ? { id: requestedRestaurantId } : {}),
+    },
+    orderBy: { updatedAt: 'desc' },
+  });
+
+  if (!restaurant) {
+    return {
+      statusCode: 409,
+      body: {
+        status: 'fail',
+        message:
+          'No restaurant profile found for this account. Please complete restaurant registration first.',
+      },
+    };
+  }
+
+  if (restaurant.status !== 'approved') {
+    return {
+      statusCode: 403,
+      body: {
+        status: 'fail',
+        message:
+          'Restaurant account is not active. Only approved restaurant accounts can perform this action.',
+      },
+    };
+  }
+
+  return { restaurant };
+};
+
+const findAccessibleRestaurantCategory = async ({ categoryId, userId, isAdmin }) => {
+  const category = await prisma.category.findFirst({
+    where: {
+      id: categoryId,
+      deletedAt: null,
+    },
+  });
+
+  if (!category) return null;
+  if (!['restaurant', 'common'].includes(category.type)) return null;
+  if (isAdmin) return category;
+  if (category.type === 'common') return null;
+  return category.createdBy === userId ? category : null;
+};
+
+const validateRestaurantProductPayload = async ({
+  payload = {},
+  userId,
+  isAdmin = false,
+  partial = false,
+  allowAvailabilityField = false,
+}) => {
+  const validated = {};
+  const providedKeys = new Set();
+
+  if (hasOwn(payload, 'name')) {
+    providedKeys.add('name');
+    if (typeof payload.name !== 'string' || payload.name.trim().length === 0) {
+      return { statusCode: 400, body: { status: 'fail', message: 'name is required' } };
+    }
+    validated.name = payload.name.trim();
+  } else if (!partial) {
+    return { statusCode: 400, body: { status: 'fail', message: 'name is required' } };
+  }
+
+  if (hasOwn(payload, 'description')) {
+    providedKeys.add('description');
+    if (
+      payload.description !== null &&
+      payload.description !== undefined &&
+      typeof payload.description !== 'string'
+    ) {
+      return {
+        statusCode: 400,
+        body: { status: 'fail', message: 'description must be a string or null' },
+      };
+    }
+    validated.description = normalizeOptionalText(payload.description);
+  }
+
+  if (hasOwn(payload, 'imageUrl')) {
+    providedKeys.add('imageUrl');
+    if (
+      payload.imageUrl !== null &&
+      payload.imageUrl !== undefined &&
+      typeof payload.imageUrl !== 'string'
+    ) {
+      return {
+        statusCode: 400,
+        body: { status: 'fail', message: 'imageUrl must be a string or null' },
+      };
+    }
+    validated.imageUrl = normalizeAssetUrl(payload.imageUrl);
+  }
+
+  if (hasOwn(payload, 'price')) {
+    providedKeys.add('price');
+    const parsedPrice = parseNonNegativeNumber(payload.price);
+    if (parsedPrice === null) {
+      return {
+        statusCode: 400,
+        body: { status: 'fail', message: 'price must be a valid non-negative number' },
+      };
+    }
+    validated.price = parsedPrice;
+  } else if (!partial) {
+    return {
+      statusCode: 400,
+      body: { status: 'fail', message: 'price must be a valid non-negative number' },
+    };
+  }
+
+  const categoryIdInput = resolveLegacyCategoryIdInput(payload);
+  if (categoryIdInput.provided) {
+    providedKeys.add('categoryId');
+    if (categoryIdInput.error) {
+      return { statusCode: 400, body: { status: 'fail', message: categoryIdInput.error } };
+    }
+
+    if (categoryIdInput.value !== null && categoryIdInput.value !== undefined) {
+      if (
+        typeof categoryIdInput.value !== 'string' ||
+        !isValidUuid(categoryIdInput.value)
+      ) {
+        return {
+          statusCode: 400,
+          body: { status: 'fail', message: 'categoryId must be a valid UUID or null' },
+        };
+      }
+
+      const category = await findAccessibleRestaurantCategory({
+        categoryId: categoryIdInput.value,
+        userId,
+        isAdmin,
+      });
+
+      if (!category) {
+        return {
+          statusCode: 400,
+          body: {
+            status: 'fail',
+            message: 'categoryId must reference an active restaurant category you can use',
+          },
+        };
+      }
+    }
+
+    validated.categoryId = categoryIdInput.value ?? null;
+  }
+
+  if (hasOwn(payload, 'stockQuantity')) {
+    providedKeys.add('stockQuantity');
+    const parsedStock = parseNonNegativeInteger(payload.stockQuantity);
+    if (parsedStock === null) {
+      return {
+        statusCode: 400,
+        body: { status: 'fail', message: 'stockQuantity must be a non-negative integer' },
+      };
+    }
+    validated.stockQuantity = parsedStock;
+  }
+
+  if (hasOwn(payload, 'preparationTimeMinutes')) {
+    providedKeys.add('preparationTimeMinutes');
+    const parsedPreparationTime = parseNonNegativeInteger(payload.preparationTimeMinutes);
+    if (parsedPreparationTime === null) {
+      return {
+        statusCode: 400,
+        body: {
+          status: 'fail',
+          message: 'preparationTimeMinutes must be a non-negative integer',
+        },
+      };
+    }
+    validated.preparationTimeMinutes = parsedPreparationTime;
+  }
+
+  if (hasOwn(payload, 'dietaryInfo')) {
+    providedKeys.add('dietaryInfo');
+    const dietaryInfo = payload.dietaryInfo;
+    if (
+      dietaryInfo !== null &&
+      typeof dietaryInfo !== 'object' &&
+      !Array.isArray(dietaryInfo)
+    ) {
+      return {
+        statusCode: 400,
+        body: { status: 'fail', message: 'dietaryInfo must be an object, array, or null' },
+      };
+    }
+    validated.dietaryInfo = dietaryInfo;
+  }
+
+  if (allowAvailabilityField && (hasOwn(payload, 'isAvailable') || hasOwn(payload, 'is_available'))) {
+    providedKeys.add('isAvailable');
+    const availability = parseBooleanValue(payload.isAvailable ?? payload.is_available);
+    if (availability === undefined) {
+      return {
+        statusCode: 400,
+        body: { status: 'fail', message: 'isAvailable must be true or false' },
+      };
+    }
+    validated.isAvailable = availability;
+  }
+
+  if (partial && providedKeys.size === 0) {
+    return {
+      statusCode: 400,
+      body: { status: 'fail', message: 'At least one updatable field is required' },
+    };
+  }
+
+  return { validated };
+};
+
+const validateRestaurantCategoryPayload = async ({
+  payload = {},
+  userId,
+  isAdmin = false,
+  partial = false,
+}) => {
+  const validated = {};
+  const providedKeys = new Set();
+
+  if (hasOwn(payload, 'name')) {
+    providedKeys.add('name');
+    if (typeof payload.name !== 'string' || payload.name.trim().length === 0) {
+      return { statusCode: 400, body: { status: 'fail', message: 'name is required' } };
+    }
+    validated.name = payload.name.trim();
+  } else if (!partial) {
+    return { statusCode: 400, body: { status: 'fail', message: 'name is required' } };
+  }
+
+  if (hasOwn(payload, 'description')) {
+    providedKeys.add('description');
+    if (
+      payload.description !== null &&
+      payload.description !== undefined &&
+      typeof payload.description !== 'string'
+    ) {
+      return {
+        statusCode: 400,
+        body: { status: 'fail', message: 'description must be a string or null' },
+      };
+    }
+    validated.description = normalizeOptionalText(payload.description);
+  }
+
+  if (hasOwn(payload, 'imageUrl')) {
+    providedKeys.add('imageUrl');
+    if (
+      payload.imageUrl !== null &&
+      payload.imageUrl !== undefined &&
+      typeof payload.imageUrl !== 'string'
+    ) {
+      return {
+        statusCode: 400,
+        body: { status: 'fail', message: 'imageUrl must be a string or null' },
+      };
+    }
+    validated.imageUrl = normalizeAssetUrl(payload.imageUrl);
+  }
+
+  if (hasOwn(payload, 'parentCategoryId')) {
+    providedKeys.add('parentCategoryId');
+    const parentCategoryId = normalizeOptionalText(payload.parentCategoryId);
+    if (parentCategoryId !== null && parentCategoryId !== undefined) {
+      if (!isValidUuid(parentCategoryId)) {
+        return {
+          statusCode: 400,
+          body: { status: 'fail', message: 'parentCategoryId must be a valid UUID or null' },
+        };
+      }
+
+      const parentCategory = await findAccessibleRestaurantCategory({
+        categoryId: parentCategoryId,
+        userId,
+        isAdmin,
+      });
+
+      if (!parentCategory) {
+        return {
+          statusCode: 400,
+          body: {
+            status: 'fail',
+            message:
+              'parentCategoryId must reference an active restaurant category you can manage',
+          },
+        };
+      }
+    }
+
+    validated.parentCategoryId = parentCategoryId ?? null;
+  }
+
+  if (partial && providedKeys.size === 0) {
+    return {
+      statusCode: 400,
+      body: { status: 'fail', message: 'At least one updatable field is required' },
+    };
+  }
+
+  return { validated };
 };
 
 const fetchSalesOverviewData = async ({ restaurantId, startDate, endDate }) => {
@@ -1031,12 +1451,13 @@ router.get('/products', authenticateToken, authorizeRole(['restaurant_owner', 'a
       });
     }
 
-    const { page = 1, limit = 20, search, categoryId } = req.query;
+    const { page = 1, limit = 20, search, categoryId, category_id: categoryIdSnakeCase } = req.query;
+    const resolvedCategoryId = categoryId || categoryIdSnakeCase;
     const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
     const where = {
       restaurantId: restaurant.id,
       deletedAt: null,
-      ...(categoryId ? { categoryId: categoryId.toString() } : {}),
+      ...(resolvedCategoryId ? { categoryId: resolvedCategoryId.toString() } : {}),
       ...(search
         ? {
             OR: [
@@ -1080,14 +1501,22 @@ router.get('/products', authenticateToken, authorizeRole(['restaurant_owner', 'a
 
 router.post('/products', authenticateToken, authorizeRole(['restaurant_owner', 'admin']), async (req, res) => {
   try {
-    const restaurant = await resolveManagedRestaurant(req);
-    if (!restaurant) {
-      return res.status(409).json({
-        status: 'fail',
-        message: 'No restaurant profile found for this account. Please complete restaurant registration first.',
-      });
+    const access = await resolveRestaurantWriteAccess(req);
+    if (access.body) {
+      return res.status(access.statusCode).json(access.body);
     }
 
+    const validation = await validateRestaurantProductPayload({
+      payload: req.body,
+      userId: req.user.id,
+      isAdmin: req.user.role === 'admin',
+      partial: false,
+    });
+    if (validation.body) {
+      return res.status(validation.statusCode).json(validation.body);
+    }
+
+    const restaurant = access.restaurant;
     const {
       name,
       description,
@@ -1097,26 +1526,18 @@ router.post('/products', authenticateToken, authorizeRole(['restaurant_owner', '
       stockQuantity,
       preparationTimeMinutes,
       dietaryInfo,
-    } = req.body;
-
-    const parsedPrice = Number.parseFloat(price);
-    if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'price must be a valid non-negative number',
-      });
-    }
+    } = validation.validated;
 
     const product = await prisma.product.create({
       data: {
         name,
         description,
-        price: parsedPrice,
+        price,
         imageUrl,
         categoryId,
         itemType: 'restaurant_menu',
         restaurantId: restaurant.id,
-        stockQuantity: stockQuantity || 0,
+        stockQuantity: stockQuantity ?? 0,
         preparationTimeMinutes,
         dietaryInfo,
         isAvailable: true,
@@ -1139,6 +1560,377 @@ router.post('/products', authenticateToken, authorizeRole(['restaurant_owner', '
     return res.status(500).json({
       status: 'error',
       message: 'An error occurred while creating restaurant product',
+    });
+  }
+});
+
+router.put('/products/:productId', authenticateToken, authorizeRole(['restaurant_owner', 'admin']), async (req, res) => {
+  try {
+    const access = await resolveRestaurantWriteAccess(req);
+    if (access.body) {
+      return res.status(access.statusCode).json(access.body);
+    }
+
+    const { productId } = req.params;
+    const restaurant = access.restaurant;
+    const validation = await validateRestaurantProductPayload({
+      payload: req.body,
+      userId: req.user.id,
+      isAdmin: req.user.role === 'admin',
+      partial: true,
+      allowAvailabilityField: true,
+    });
+    if (validation.body) {
+      return res.status(validation.statusCode).json(validation.body);
+    }
+
+    const product = await prisma.product.findUnique({ where: { id: productId } });
+    if (!product || product.deletedAt) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Product not found',
+      });
+    }
+
+    if (req.user.role !== 'admin' && product.restaurantId !== restaurant.id) {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'You do not have permission to update this product',
+      });
+    }
+
+    const updatedProduct = await prisma.product.update({
+      where: { id: productId },
+      data: {
+        ...validation.validated,
+        updatedBy: req.user.id,
+        updatedAt: new Date(),
+      },
+    });
+
+    return res.status(200).json({
+      status: 'success',
+      data: updatedProduct,
+    });
+  } catch (error) {
+    if (error?.code === 'P2003') {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid category reference.',
+      });
+    }
+    console.error('Update restaurant product error:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while updating restaurant product',
+    });
+  }
+});
+
+router.delete('/products/:productId', authenticateToken, authorizeRole(['restaurant_owner', 'admin']), async (req, res) => {
+  try {
+    const access = await resolveRestaurantWriteAccess(req);
+    if (access.body) {
+      return res.status(access.statusCode).json(access.body);
+    }
+
+    const restaurant = access.restaurant;
+    const { productId } = req.params;
+    const product = await prisma.product.findUnique({ where: { id: productId } });
+    if (!product || product.deletedAt) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Product not found',
+      });
+    }
+
+    if (req.user.role !== 'admin' && product.restaurantId !== restaurant.id) {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'You do not have permission to delete this product',
+      });
+    }
+
+    await prisma.product.update({
+      where: { id: productId },
+      data: {
+        deletedAt: new Date(),
+        updatedBy: req.user.id,
+        updatedAt: new Date(),
+      },
+    });
+
+    return res.status(200).json({
+      status: 'success',
+      message: 'Product deleted successfully',
+    });
+  } catch (error) {
+    console.error('Delete restaurant product error:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while deleting restaurant product',
+    });
+  }
+});
+
+router.patch('/products/:productId/availability', authenticateToken, authorizeRole(['restaurant_owner', 'admin']), async (req, res) => {
+  try {
+    const access = await resolveRestaurantWriteAccess(req);
+    if (access.body) {
+      return res.status(access.statusCode).json(access.body);
+    }
+
+    const { productId } = req.params;
+    const restaurant = access.restaurant;
+    const availability = parseBooleanValue(req.body.is_available ?? req.body.isAvailable);
+    if (availability === undefined) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'is_available must be true or false',
+      });
+    }
+
+    const product = await prisma.product.findUnique({ where: { id: productId } });
+    if (!product || product.deletedAt) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Product not found',
+      });
+    }
+
+    if (req.user.role !== 'admin' && product.restaurantId !== restaurant.id) {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'You do not have permission to update this product',
+      });
+    }
+
+    const updatedProduct = await prisma.product.update({
+      where: { id: productId },
+      data: {
+        isAvailable: availability,
+        updatedBy: req.user.id,
+        updatedAt: new Date(),
+      },
+    });
+
+    return res.status(200).json({
+      status: 'success',
+      data: updatedProduct,
+    });
+  } catch (error) {
+    console.error('Update restaurant product availability error:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while updating restaurant product availability',
+    });
+  }
+});
+
+// ========== CATEGORY MANAGEMENT ENDPOINTS ==========
+
+router.get('/categories', authenticateToken, authorizeRole(['restaurant_owner', 'admin']), async (req, res) => {
+  try {
+    const categories = await prisma.category.findMany({
+      where: {
+        OR: req.user.role === 'admin'
+          ? [{ type: { in: ['restaurant', 'common'] } }]
+          : [
+              { type: 'common' },
+              {
+                type: 'restaurant',
+                createdBy: req.user.id,
+              },
+            ],
+        deletedAt: null,
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    return res.status(200).json({
+      status: 'success',
+      data: categories,
+    });
+  } catch (error) {
+    console.error('Get restaurant categories error:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while fetching categories',
+    });
+  }
+});
+
+router.post('/categories', authenticateToken, authorizeRole(['restaurant_owner', 'admin']), async (req, res) => {
+  try {
+    const access = await resolveRestaurantWriteAccess(req);
+    if (access.body) {
+      return res.status(access.statusCode).json(access.body);
+    }
+
+    const validation = await validateRestaurantCategoryPayload({
+      payload: req.body,
+      userId: req.user.id,
+      isAdmin: req.user.role === 'admin',
+      partial: false,
+    });
+    if (validation.body) {
+      return res.status(validation.statusCode).json(validation.body);
+    }
+
+    const category = await prisma.category.create({
+      data: {
+        ...validation.validated,
+        type: 'restaurant',
+        createdBy: req.user.id,
+      },
+    });
+
+    return res.status(201).json({
+      status: 'success',
+      data: category,
+    });
+  } catch (error) {
+    console.error('Create restaurant category error:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while creating category',
+    });
+  }
+});
+
+router.put('/categories/:categoryId', authenticateToken, authorizeRole(['restaurant_owner', 'admin']), async (req, res) => {
+  try {
+    const access = await resolveRestaurantWriteAccess(req);
+    if (access.body) {
+      return res.status(access.statusCode).json(access.body);
+    }
+
+    const { categoryId } = req.params;
+    const validation = await validateRestaurantCategoryPayload({
+      payload: req.body,
+      userId: req.user.id,
+      isAdmin: req.user.role === 'admin',
+      partial: true,
+    });
+    if (validation.body) {
+      return res.status(validation.statusCode).json(validation.body);
+    }
+
+    const category = await prisma.category.findFirst({
+      where: {
+        id: categoryId,
+        deletedAt: null,
+      },
+    });
+    if (!category) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Category not found',
+      });
+    }
+
+    if (category.type !== 'restaurant' && req.user.role !== 'admin') {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'You do not have permission to update this category',
+      });
+    }
+
+    if (
+      req.user.role !== 'admin' &&
+      (category.type !== 'restaurant' || category.createdBy !== req.user.id)
+    ) {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'You do not have permission to update this category',
+      });
+    }
+
+    const updatedCategory = await prisma.category.update({
+      where: { id: categoryId },
+      data: {
+        ...validation.validated,
+        updatedBy: req.user.id,
+        updatedAt: new Date(),
+      },
+    });
+
+    return res.status(200).json({
+      status: 'success',
+      data: updatedCategory,
+    });
+  } catch (error) {
+    console.error('Update restaurant category error:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while updating category',
+    });
+  }
+});
+
+router.delete('/categories/:categoryId', authenticateToken, authorizeRole(['restaurant_owner', 'admin']), async (req, res) => {
+  try {
+    const access = await resolveRestaurantWriteAccess(req);
+    if (access.body) {
+      return res.status(access.statusCode).json(access.body);
+    }
+
+    const { categoryId } = req.params;
+    const category = await prisma.category.findFirst({
+      where: {
+        id: categoryId,
+        deletedAt: null,
+      },
+    });
+    if (!category) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Category not found',
+      });
+    }
+
+    if (
+      req.user.role !== 'admin' &&
+      (category.type !== 'restaurant' || category.createdBy !== req.user.id)
+    ) {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'You do not have permission to delete this category',
+      });
+    }
+
+    const activeProducts = await prisma.product.count({
+      where: {
+        categoryId,
+        deletedAt: null,
+      },
+    });
+
+    if (activeProducts > 0) {
+      return res.status(409).json({
+        status: 'fail',
+        message: 'Category cannot be deleted while products still reference it',
+      });
+    }
+
+    await prisma.category.update({
+      where: { id: categoryId },
+      data: {
+        deletedAt: new Date(),
+        updatedBy: req.user.id,
+        updatedAt: new Date(),
+      },
+    });
+
+    return res.status(200).json({
+      status: 'success',
+      message: 'Category deleted successfully',
+    });
+  } catch (error) {
+    console.error('Delete restaurant category error:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while deleting category',
     });
   }
 });
@@ -1208,6 +2000,78 @@ router.get('/orders', authenticateToken, authorizeRole(['restaurant_owner', 'adm
   }
 });
 
+router.get('/orders/:orderId', authenticateToken, authorizeRole(['restaurant_owner', 'admin']), async (req, res) => {
+  try {
+    const restaurant = await resolveManagedRestaurant(req);
+    if (!restaurant) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'No restaurant profile found for this account. Please complete restaurant registration first.',
+      });
+    }
+
+    const { orderId } = req.params;
+    const order = await prisma.order.findFirst({
+      where: {
+        id: orderId,
+        restaurantId: restaurant.id,
+        deletedAt: null,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            phoneNumber: true,
+            email: true,
+          },
+        },
+        orderItems: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                imageUrl: true,
+                description: true,
+                price: true,
+              },
+            },
+          },
+        },
+        deliveryAddress: true,
+        restaurant: {
+          select: {
+            id: true,
+            name: true,
+            phoneNumber: true,
+            addressLine1: true,
+            city: true,
+          },
+        },
+      },
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Order not found',
+      });
+    }
+
+    return res.status(200).json({
+      status: 'success',
+      data: order,
+    });
+  } catch (error) {
+    console.error('Get restaurant order details error:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'An error occurred while fetching order details',
+    });
+  }
+});
+
 router.put('/orders/:orderId/status', authenticateToken, authorizeRole(['restaurant_owner', 'admin']), async (req, res) => {
   try {
     const restaurant = await resolveManagedRestaurant(req);
@@ -1219,15 +2083,18 @@ router.put('/orders/:orderId/status', authenticateToken, authorizeRole(['restaur
     }
 
     const { orderId } = req.params;
-    const { status } = req.body;
     const cancellationReason = String(
       req.body?.reason || req.body?.notes || req.body?.cancellationReason || ''
     ).trim();
-    const allowedStatuses = ['pending', 'confirmed', 'preparing', 'ready_for_pickup', 'out_for_delivery', 'delivered', 'completed', 'cancelled'];
-    if (!status || !allowedStatuses.includes(status)) {
+    // Accepts aliases (accepted->confirmed, processing->preparing,
+    // ready->ready_for_pickup, canceled->cancelled) the same way bakery.js
+    // and orders.js already do, so the Flutter client's status values are
+    // interpreted consistently across all three vendor-order endpoints.
+    const status = resolveOrderStatus(req.body?.status);
+    if (!status) {
       return res.status(400).json({
         status: 'fail',
-        message: `Invalid status. Allowed values: ${allowedStatuses.join(', ')}`,
+        message: 'Invalid status. Allowed values: pending, confirmed, preparing, ready_for_pickup, out_for_delivery, delivered, completed, cancelled (aliases accepted).',
       });
     }
 
@@ -1243,6 +2110,12 @@ router.put('/orders/:orderId/status', authenticateToken, authorizeRole(['restaur
       return res.status(404).json({
         status: 'fail',
         message: 'Order not found',
+      });
+    }
+    if (!canTransitionOrder(order.status, status)) {
+      return res.status(409).json({
+        status: 'fail',
+        message: `Cannot transition order from ${order.status} to ${status}`,
       });
     }
 
@@ -1441,9 +2314,13 @@ router.post('/', authenticateToken, authorizeRole(['restaurant_owner', 'admin'])
       registrationDocumentUrl,
     });
     
-    // Create new restaurant
-    const restaurant = await prisma.restaurant.create({
-      data: {
+    const owner = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { email: true },
+    });
+    const restaurant = await prisma.$transaction(async (tx) => {
+      const created = await tx.restaurant.create({
+        data: {
         name,
         description,
         cuisineType,
@@ -1462,7 +2339,22 @@ router.post('/', authenticateToken, authorizeRole(['restaurant_owner', 'admin'])
         status: 'pending_approval',
         ownerId: req.user.id,
         createdBy: req.user.id
-      }
+        }
+      });
+      await consumeOnboardingUploads({
+        tx,
+        userId: req.user.id,
+        vendorId: created.id,
+        role: 'restaurant_owner',
+        email: owner?.email || email,
+        purposeUrls: {
+          commercial_registry:
+            commercialRegistryUrl || commercialRegisterPath || registrationDocumentUrl,
+          vendor_logo: resolvedLogoUrl,
+          vendor_cover: resolvedCoverImageUrl,
+        },
+      });
+      return created;
     });
     
     return res.status(201).json({
@@ -1473,6 +2365,12 @@ router.post('/', authenticateToken, authorizeRole(['restaurant_owner', 'admin'])
     });
   } catch (error) {
     console.error('Register restaurant error:', error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        status: 'fail',
+        message: error.message,
+      });
+    }
     return res.status(500).json({
       status: 'error',
       message: 'An error occurred while registering restaurant'

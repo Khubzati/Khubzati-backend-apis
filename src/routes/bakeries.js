@@ -5,6 +5,7 @@ const prisma = require('../lib/prisma');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 
 const router = express.Router();
+const { consumeOnboardingUploads } = require('../services/onboardingUploadService');
 const uploadsDir = path.join(__dirname, '../../uploads');
 
 const enableStubs = (process.env.ENABLE_STUB_RESPONSES || '').toLowerCase() === 'true';
@@ -527,8 +528,26 @@ router.post('/', authenticateToken, authorizeRole(['bakery_owner', 'admin']), as
       createData.deliveryProvider = normalizedDeliveryProvider || 'third_party';
     }
 
-    // Create new bakery
-    const bakery = await prisma.bakery.create({ data: createData });
+    const owner = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { email: true },
+    });
+    const bakery = await prisma.$transaction(async (tx) => {
+      const created = await tx.bakery.create({ data: createData });
+      await consumeOnboardingUploads({
+        tx,
+        userId: req.user.id,
+        vendorId: created.id,
+        role: 'bakery_owner',
+        email: owner?.email || email,
+        purposeUrls: {
+          commercial_registry: commercialRegistryUrl,
+          vendor_logo: bakeryAssetPayload.logoUrl,
+          vendor_cover: bakeryAssetPayload.coverImageUrl,
+        },
+      });
+      return created;
+    });
 
     return res.status(201).json({
       status: 'success',
@@ -538,6 +557,12 @@ router.post('/', authenticateToken, authorizeRole(['bakery_owner', 'admin']), as
     });
   } catch (error) {
     console.error('Register bakery error:', error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        status: 'fail',
+        message: error.message,
+      });
+    }
     return res.status(500).json({
       status: 'error',
       message: 'An error occurred while registering bakery'

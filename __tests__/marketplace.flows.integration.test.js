@@ -121,7 +121,13 @@ describe('Marketplace end-to-end integration flows', () => {
   });
 
   afterAll(async () => {
-    await prisma.slaAlertDeliveryAttempt.deleteMany({ where: { delivery: { eventType: { contains: 'test' } } } }).catch(() => null);
+    const testDeliveries = await prisma.slaAlertDelivery.findMany({
+      where: { eventType: { contains: 'test' } },
+      select: { id: true },
+    }).catch(() => []);
+    await prisma.slaAlertDeliveryAttempt.deleteMany({
+      where: { deliveryId: { in: testDeliveries.map(({ id }) => id) } },
+    }).catch(() => null);
     await prisma.slaAlertDelivery.deleteMany({ where: { eventType: { contains: 'test' } } }).catch(() => null);
     await prisma.slaAlertDeadLetter.deleteMany({ where: { eventType: { contains: 'test' } } }).catch(() => null);
 
@@ -129,6 +135,7 @@ describe('Marketplace end-to-end integration flows', () => {
 
     await prisma.disputeMessage.deleteMany({ where: { disputeId: { in: created.disputes } } }).catch(() => null);
     await prisma.disputeCase.deleteMany({ where: { id: { in: created.disputes } } }).catch(() => null);
+    await prisma.financialTransaction.deleteMany({ where: { refundRequestId: { in: created.refunds } } }).catch(() => null);
     await prisma.refundRequest.deleteMany({ where: { id: { in: created.refunds } } }).catch(() => null);
 
     await prisma.financialTransaction.deleteMany({ where: { payoutRequestId: { in: created.payouts } } }).catch(() => null);
@@ -155,6 +162,8 @@ describe('Marketplace end-to-end integration flows', () => {
 
     await prisma.address.deleteMany({ where: { id: { in: created.addresses } } }).catch(() => null);
     await prisma.driverProfile.deleteMany({ where: { userId: { in: created.users } } }).catch(() => null);
+    await prisma.notification.deleteMany({ where: { userId: { in: created.users } } }).catch(() => null);
+    await prisma.auditLog.deleteMany({ where: { actorUserId: { in: created.users } } }).catch(() => null);
     await prisma.user.deleteMany({ where: { id: { in: created.users } } }).catch(() => null);
   });
 
@@ -245,6 +254,12 @@ describe('Marketplace end-to-end integration flows', () => {
     bakery = registerBakery.body?.data?.bakery;
     expect(bakery?.id).toBeTruthy();
     markCreated('bakeries', bakery.id);
+
+    // Product mutations are deliberately restricted to approved vendors.
+    await prisma.bakery.update({
+      where: { id: bakery.id },
+      data: { status: 'approved', rejectedAt: null, rejectionReason: null },
+    });
 
     const updateBakery = await request(app)
       .put(`/v1/bakeries/${bakery.id}`)

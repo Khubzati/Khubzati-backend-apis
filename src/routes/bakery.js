@@ -1,11 +1,23 @@
 const express = require('express');
+const { canTransitionOrder } = require('../utils/order-transition');
 const prisma = require('../lib/prisma');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const { ORDER_STATUSES, resolveOrderStatus } = require('../utils/order-status');
 const { notifyUser, notifyUsers } = require('../services/notificationDispatchService');
 const { orderEmailService } = require('../services/orderEmailService');
+const { sendOtpPushToMany } = require('../services/pushNotificationService');
 
 const router = express.Router();
+
+// Currencies a product may be priced in. Stored uppercase; default JOD.
+const SUPPORTED_CURRENCIES = new Set([
+    'JOD', 'USD', 'EUR', 'GBP', 'SAR', 'AED', 'KWD', 'QAR', 'BHD', 'OMR', 'EGP',
+]);
+const normalizeProductCurrency = (raw, fallback = 'JOD') => {
+    const value = String(raw ?? '').trim().toUpperCase();
+    if (!value) return fallback;
+    return SUPPORTED_CURRENCIES.has(value) ? value : null;
+};
 
 const enableStubs = (process.env.ENABLE_STUB_RESPONSES || '').toLowerCase() === 'true';
 const allowTestFallbacks = false;
@@ -19,6 +31,7 @@ const isBakeryCurrencyColumnMissingError = (error) =>
     error.meta.column.includes('bakeries.currency');
 const isWriteMethod = (method) => ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
 const resolveRequestedBakeryId = (req) =>
+    req.headers?.['x-vendor-id'] ||
     req.query?.bakeryId ||
     req.body?.bakeryId ||
     req.params?.bakeryId ||
@@ -159,8 +172,25 @@ const ensureBakeryOwner = async (req, res, next) => {
         });
 
         if (bakery) {
+            if (isWriteMethod(req.method) && bakery.status !== 'approved') {
+                return res.status(403).json({
+                    status: 'fail',
+                    message: bakery.status === 'pending_approval'
+                        ? 'Your bakery is still pending admin approval. You cannot manage products or orders yet.'
+                        : 'Your bakery account is not in an approved state. Please contact support.',
+                });
+            }
             req.bakery = bakery;
             return next();
+        }
+
+        // An explicit context is an authorization boundary. Never replace an
+        // invalid or foreign selection with an auto-created/default bakery.
+        if (requestedBakeryId) {
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Selected bakery was not found for this owner.',
+            });
         }
 
         // Activation fallback:
@@ -982,12 +1012,23 @@ router.post('/products', authenticateToken, authorizeRole(['bakery_owner', 'admi
             name,
             description,
             price,
+            currency,
             imageUrl,
             categoryId,
             stockQuantity,
             preparationTimeMinutes,
             dietaryInfo
         } = req.body;
+
+        // Currency defaults to JOD (Jordanian Dinar). Stored as an uppercase
+        // ISO-style code; the mobile app shows "JD" for JOD.
+        const normalizedCurrency = normalizeProductCurrency(currency);
+        if (normalizedCurrency === null) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Unsupported currency'
+            });
+        }
 
         const bakeryIdToUse = req.user.role === 'admin'
             ? (req.body.bakeryId || req.bakery?.id)
@@ -1033,6 +1074,7 @@ router.post('/products', authenticateToken, authorizeRole(['bakery_owner', 'admi
                 name,
                 description,
                 price: parsedPrice,
+                currency: normalizedCurrency,
                 imageUrl,
                 categoryId,
                 itemType: 'bakery',
@@ -1080,6 +1122,7 @@ router.put('/products/:productId', authenticateToken, authorizeRole(['bakery_own
             name,
             description,
             price,
+            currency,
             imageUrl,
             categoryId,
             stockQuantity,
@@ -1087,6 +1130,18 @@ router.put('/products/:productId', authenticateToken, authorizeRole(['bakery_own
             dietaryInfo,
             isAvailable
         } = req.body;
+
+        // Only validate currency when the client sends it.
+        let normalizedCurrency;
+        if (currency !== undefined) {
+            normalizedCurrency = normalizeProductCurrency(currency);
+            if (normalizedCurrency === null) {
+                return res.status(400).json({
+                    status: 'fail',
+                    message: 'Unsupported currency'
+                });
+            }
+        }
 
         const bakeryId = req.bakery?.id || req.query.bakeryId;
 
@@ -1120,6 +1175,7 @@ router.put('/products/:productId', authenticateToken, authorizeRole(['bakery_own
                 ...(name !== undefined && { name }),
                 ...(description !== undefined && { description }),
                 ...(price !== undefined && { price: parseFloat(price) }),
+                ...(normalizedCurrency !== undefined && { currency: normalizedCurrency }),
                 ...(imageUrl !== undefined && { imageUrl }),
                 ...(categoryId !== undefined && { categoryId }),
                 ...(stockQuantity !== undefined && { stockQuantity: parseInt(stockQuantity) }),
@@ -1576,6 +1632,12 @@ router.get('/orders', authenticateToken, authorizeRole(['bakery_owner', 'admin']
                             phoneNumber: true
                         }
                     },
+                    restaurant: {
+                        select: {
+                            id: true,
+                            name: true
+                        }
+                    },
                     orderItems: {
                         include: {
                             product: {
@@ -1596,9 +1658,36 @@ router.get('/orders', authenticateToken, authorizeRole(['bakery_owner', 'admin']
             prisma.order.count({ where: whereClause })
         ]);
 
+        // Flag orders that belong to a daily recurring setup. An order is
+        // "daily" when a RecurringOrder references it as its source order (the
+        // one the restaurant placed with daily repeat on) or as its most
+        // recently generated order. Computed here so no schema change/migration
+        // is required.
+        const orderIds = orders.map((order) => order.id);
+        const recurringOrderIds = new Set();
+        if (orderIds.length > 0) {
+            const recurringLinks = await prisma.recurringOrder.findMany({
+                where: {
+                    OR: [
+                        { sourceOrderId: { in: orderIds } },
+                        { lastOrderId: { in: orderIds } }
+                    ]
+                },
+                select: { sourceOrderId: true, lastOrderId: true }
+            });
+            for (const link of recurringLinks) {
+                if (link.sourceOrderId) recurringOrderIds.add(link.sourceOrderId);
+                if (link.lastOrderId) recurringOrderIds.add(link.lastOrderId);
+            }
+        }
+        const ordersWithRecurringFlag = orders.map((order) => ({
+            ...order,
+            isRecurring: recurringOrderIds.has(order.id)
+        }));
+
         return res.status(200).json({
             status: 'success',
-            data: orders,
+            data: ordersWithRecurringFlag,
             meta: {
                 pagination: {
                     total: totalCount,
@@ -1680,9 +1769,9 @@ router.get('/orders/:orderId', authenticateToken, authorizeRole(['bakery_owner',
         });
 
         if (!order) {
-            return res.status(200).json({
-                status: 'success',
-                data: {}
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Order not found'
             });
         }
 
@@ -1761,9 +1850,15 @@ router.put('/orders/:orderId/status', authenticateToken, authorizeRole(['bakery_
         });
 
         if (!order) {
-            return res.status(200).json({
-                status: 'success',
-                data: { id: orderId, status: resolvedStatus }
+            return res.status(404).json({
+                status: 'fail',
+                message: 'Order not found'
+            });
+        }
+        if (!canTransitionOrder(order.status, resolvedStatus)) {
+            return res.status(409).json({
+                status: 'fail',
+                message: `Cannot transition order from ${order.status} to ${resolvedStatus}`,
             });
         }
 
@@ -2479,7 +2574,8 @@ router.put('/profile', authenticateToken, authorizeRole(['bakery_owner', 'admin'
                 ...(city !== undefined && { city }),
                 ...(postalCode !== undefined && { postalCode }),
                 ...(country !== undefined && { country }),
-                ...(phoneNumber !== undefined && { phoneNumber }),
+                // Phone number changes require OTP verification and are applied
+                // only via POST /profile/phone/confirm — ignored here.
                 ...(email !== undefined && { email }),
                 ...(logoUrl !== undefined && { logoUrl }),
                 ...(coverImageUrl !== undefined && { coverImageUrl }),
@@ -2509,6 +2605,127 @@ router.put('/profile', authenticateToken, authorizeRole(['bakery_owner', 'admin'
         return res.status(500).json({
             status: 'error',
             message: 'An error occurred while updating bakery profile'
+        });
+    }
+});
+
+// Request an OTP to verify a phone-number change on the profile. The code is
+// stored on the user and delivered via push (and logged in non-production).
+router.post('/profile/phone/request-otp', authenticateToken, authorizeRole(['bakery_owner', 'admin']), ensureBakeryOwner, async (req, res) => {
+    try {
+        const { phoneNumber } = req.body;
+        if (!phoneNumber || String(phoneNumber).replace(/\D/g, '').length < 6) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'A valid new phone number is required',
+            });
+        }
+
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+
+        await prisma.user.update({
+            where: { id: req.user.id },
+            data: { otp, otpExpiry },
+        });
+
+        // Best-effort push delivery to the user's registered devices.
+        try {
+            const tokens = await prisma.deviceToken.findMany({
+                where: { userId: req.user.id },
+                select: { token: true },
+            });
+            const tokenList = tokens.map((t) => t.token).filter(Boolean);
+            if (tokenList.length) {
+                await sendOtpPushToMany(tokenList, otp, 'phone_change');
+            }
+        } catch (pushError) {
+            console.warn('Phone-change OTP push failed:', pushError.message);
+        }
+
+        if (process.env.NODE_ENV !== 'production') {
+            console.log(
+                `📱 Phone-change OTP for user ${req.user.id} → ${phoneNumber}: ${otp} (expires ${otpExpiry.toISOString()})`
+            );
+        }
+
+        return res.status(200).json({
+            status: 'success',
+            message: 'Verification code sent',
+        });
+    } catch (error) {
+        console.error('Request phone-change OTP error:', error);
+        return res.status(500).json({
+            status: 'error',
+            message: 'An error occurred while sending the verification code',
+        });
+    }
+});
+
+// Confirm the phone-number change by verifying the OTP, then update the phone.
+router.post('/profile/phone/confirm', authenticateToken, authorizeRole(['bakery_owner', 'admin']), ensureBakeryOwner, async (req, res) => {
+    try {
+        const { phoneNumber, otp } = req.body;
+        if (!phoneNumber || !otp) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Phone number and verification code are required',
+            });
+        }
+
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            select: { otp: true, otpExpiry: true },
+        });
+
+        const now = new Date();
+        if (!user ||
+            !user.otp ||
+            !user.otpExpiry ||
+            user.otp !== String(otp).trim() ||
+            user.otpExpiry < now) {
+            return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid or expired verification code',
+            });
+        }
+
+        const updatedBakery = await prisma.bakery.update({
+            where: { id: req.bakery.id },
+            data: {
+                phoneNumber,
+                updatedBy: req.user.id,
+                updatedAt: new Date(),
+            },
+            include: {
+                owner: {
+                    select: {
+                        id: true,
+                        username: true,
+                        email: true,
+                        fullName: true,
+                        phoneNumber: true,
+                    },
+                },
+            },
+        });
+
+        // Clear the consumed OTP.
+        await prisma.user.update({
+            where: { id: req.user.id },
+            data: { otp: null, otpExpiry: null },
+        });
+
+        return res.status(200).json({
+            status: 'success',
+            data: updatedBakery,
+            message: 'Phone number updated',
+        });
+    } catch (error) {
+        console.error('Confirm phone-change error:', error);
+        return res.status(500).json({
+            status: 'error',
+            message: 'An error occurred while updating the phone number',
         });
     }
 });

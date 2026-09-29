@@ -79,11 +79,11 @@ npm run start:dev
 npm start
 ```
 
-The server will start on `http://localhost:3000` (or the port specified in `APP_PORT`)
+The server will start on `https://api.khubzati.com` (or the port specified in `APP_PORT`)
 
 ## 🌐 API Base URL
 
-- **Local Development:** `http://localhost:3000`
+- **Local Development:** `https://api.khubzati.com`
 - API supports both `/api/*` and `/v1/*` endpoints
 
 ## 📡 Making Requests
@@ -93,7 +93,7 @@ The server will start on `http://localhost:3000` (or the port specified in `APP_
 First, verify the server is running:
 
 ```bash
-curl http://localhost:3000/
+curl https://api.khubzati.com/
 ```
 
 **Response:**
@@ -110,7 +110,7 @@ curl http://localhost:3000/
 #### 1. Register a New User
 
 ```bash
-curl -X POST http://localhost:3000/api/auth/register \
+curl -X POST https://api.khubzati.com/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{
     "username": "john_doe",
@@ -143,7 +143,7 @@ curl -X POST http://localhost:3000/api/auth/register \
 #### 2. Login
 
 ```bash
-curl -X POST http://localhost:3000/api/auth/login \
+curl -X POST https://api.khubzati.com/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{
     "emailOrPhone": "john@example.com",
@@ -190,14 +190,14 @@ export TOKEN="your_jwt_token_here"
 After login, include the token in the Authorization header:
 
 ```bash
-curl -X GET http://localhost:3000/api/users/me \
+curl -X GET https://api.khubzati.com/api/users/me \
   -H "Authorization: Bearer $TOKEN"
 ```
 
 #### 3. Get Current User Profile
 
 ```bash
-curl -X GET http://localhost:3000/api/users/me \
+curl -X GET https://api.khubzati.com/api/users/me \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json"
 ```
@@ -205,7 +205,7 @@ curl -X GET http://localhost:3000/api/users/me \
 #### 4. Update User Profile
 
 ```bash
-curl -X PUT http://localhost:3000/api/users/me \
+curl -X PUT https://api.khubzati.com/api/users/me \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -218,7 +218,7 @@ curl -X PUT http://localhost:3000/api/users/me \
 
 #### Create an Order
 ```bash
-curl -X POST http://localhost:3000/api/orders \
+curl -X POST https://api.khubzati.com/api/orders \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -236,13 +236,13 @@ curl -X POST http://localhost:3000/api/orders \
 
 #### Get All Bakeries
 ```bash
-curl -X GET http://localhost:3000/api/bakeries \
+curl -X GET https://api.khubzati.com/api/bakeries \
   -H "Content-Type: application/json"
 ```
 
 #### Get User Orders
 ```bash
-curl -X GET http://localhost:3000/api/orders \
+curl -X GET https://api.khubzati.com/api/orders \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -250,7 +250,7 @@ curl -X GET http://localhost:3000/api/orders \
 
 ```javascript
 // Login
-const loginResponse = await fetch('http://localhost:3000/api/auth/login', {
+const loginResponse = await fetch('https://api.khubzati.com/api/auth/login', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
@@ -265,7 +265,7 @@ const { data } = await loginResponse.json();
 const token = data.token;
 
 // Get user profile
-const profileResponse = await fetch('http://localhost:3000/api/users/me', {
+const profileResponse = await fetch('https://api.khubzati.com/api/users/me', {
   method: 'GET',
   headers: {
     'Authorization': `Bearer ${token}`,
@@ -280,8 +280,8 @@ console.log(profile);
 ### Using Postman
 
 1. **Setup:**
-   - Base URL: `http://localhost:3000`
-   - Create environment variable: `baseUrl = http://localhost:3000`
+   - Base URL: `https://api.khubzati.com`
+   - Create environment variable: `baseUrl = https://api.khubzati.com`
    - Create environment variable: `token` (will be set after login)
 
 2. **Login Request:**
@@ -404,7 +404,7 @@ npx prisma generate
 
 3. **Login as admin:**
    ```bash
-   curl -X POST http://localhost:3000/api/auth/login \
+   curl -X POST https://api.khubzati.com/api/auth/login \
      -H "Content-Type: application/json" \
      -d '{"emailOrPhone": "admin@khubzati.com", "password": "Admin@1234"}'
    ```
@@ -412,14 +412,14 @@ npx prisma generate
 4. **Use the token for authenticated requests:**
    ```bash
    export TOKEN="your_token_here"
-   curl -X GET http://localhost:3000/api/users/me \
+   curl -X GET https://api.khubzati.com/api/users/me \
      -H "Authorization: Bearer $TOKEN"
    ```
 
 ## 🎯 Testing with the Admin Interface
 
 The admin interface should connect to this API. Make sure:
-- API is running on `http://localhost:3000`
+- API is running on `https://api.khubzati.com`
 - Admin credentials are created using `npm run create-admin`
 - CORS is enabled (already configured in the API)
 

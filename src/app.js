@@ -120,6 +120,7 @@ const paymentRoutes = require('./routes/payments');
 const financeRoutes = require('./routes/finance');
 const deliveryRoutes = require('./routes/delivery');
 const contractRoutes = require('./routes/contracts');
+const cartRoutes = require('./routes/cart');
 
 // Middleware
 app.use(helmet()); // Security headers
@@ -178,6 +179,8 @@ app.use('/v1/products', productRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/v1/orders', orderRoutes);
 app.use('/api/customer/orders', orderRoutes);
+app.use('/api/customer/cart', cartRoutes);
+app.use('/v1/customer/cart', cartRoutes);
 app.use('/v1/customer/orders', orderRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/v1/reviews', reviewRoutes);

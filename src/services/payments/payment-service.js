@@ -226,22 +226,19 @@ class PaymentService {
     let orderForEmail = null;
 
     await this.prisma.$transaction(async (tx) => {
-      try {
-        await tx.webhookEvent.create({
-          data: {
-            provider: PAYMENT_PROVIDERS.STRIPE,
-            eventId: event.id,
-            eventType: event.type,
-            payload: event,
-            orderId: reference.orderId,
-          },
-        });
-      } catch (error) {
-        if (error?.code === 'P2002') {
-          duplicate = true;
-          return;
-        }
-        throw error;
+      const receipt = await tx.webhookEvent.createMany({
+        data: [{
+          provider: PAYMENT_PROVIDERS.STRIPE,
+          eventId: event.id,
+          eventType: event.type,
+          payload: event,
+          orderId: reference.orderId,
+        }],
+        skipDuplicates: true,
+      });
+      if (receipt.count === 0) {
+        duplicate = true;
+        return;
       }
 
       if (!reference.orderId) {
@@ -351,6 +348,23 @@ class PaymentService {
           },
         });
       }
+
+      await ensureOrderFinancialRecord({ prisma: tx, orderId: reference.orderId });
+      await appendFinancialTransaction({
+        prisma: tx,
+        orderId: reference.orderId,
+        transactionType: 'order_payment',
+        status:
+          event.type === 'payment_intent.payment_failed'
+            ? 'failed'
+            : 'paid',
+        amount: Number(existingOrder.totalAmount),
+        currency: this.normalizeCurrency(existingOrder.currency),
+        provider: PAYMENT_PROVIDERS.STRIPE,
+        providerReference: reference.providerPaymentId,
+        sideEffectKey: `stripe-webhook:${event.id}`,
+        metadata: { eventId: event.id, eventType: event.type },
+      });
     });
 
     if (orderForEmail) {
@@ -359,25 +373,6 @@ class PaymentService {
       } catch (emailError) {
         console.error('Payment confirmation email failed:', emailError);
       }
-    }
-
-    if (reference.orderId) {
-      const settledOrder = await this.prisma.order.findUnique({ where: { id: reference.orderId } });
-      await ensureOrderFinancialRecord({ prisma: this.prisma, orderId: reference.orderId });
-      await appendFinancialTransaction({
-        prisma: this.prisma,
-        orderId: reference.orderId,
-        transactionType: 'order_payment',
-        status:
-          event.type === 'payment_intent.payment_failed'
-            ? 'failed'
-            : 'paid',
-        amount: Number(settledOrder?.totalAmount || 0),
-        currency: this.normalizeCurrency(settledOrder?.currency),
-        provider: PAYMENT_PROVIDERS.STRIPE,
-        providerReference: reference.providerPaymentId,
-        metadata: { eventId: event.id, eventType: event.type },
-      });
     }
 
     return {

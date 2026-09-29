@@ -107,6 +107,7 @@ const appendFinancialTransaction = async ({
   currency = 'JOD',
   provider = null,
   providerReference = null,
+  sideEffectKey = null,
   metadata = null,
 }) =>
   prisma.financialTransaction.create({
@@ -120,6 +121,7 @@ const appendFinancialTransaction = async ({
       currency,
       provider,
       providerReference,
+      sideEffectKey,
       metadata: metadata || null,
     },
   });

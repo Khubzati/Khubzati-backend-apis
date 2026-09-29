@@ -41,6 +41,7 @@ async function seedOrder() {
       fullName: 'Test User',
       phoneNumber: `+96279${Math.floor(1000000 + Math.random() * 899999)}`,
       role: 'customer',
+      isVerified: true,
     },
   });
 
@@ -53,7 +54,7 @@ async function seedOrder() {
       totalAmount: 10,
       paymentMethod: 'credit_card',
       paymentStatus: 'pending',
-      bakeryId: null,
+      bakeryId: 'test-bakery-id',
       restaurantId: null,
     },
   });
@@ -63,6 +64,7 @@ async function seedOrder() {
       name: `Product ${Date.now()}`,
       price: 10,
       itemType: 'bakery',
+      bakeryId: 'test-bakery-id',
       stockQuantity: 20,
       isAvailable: true,
     },

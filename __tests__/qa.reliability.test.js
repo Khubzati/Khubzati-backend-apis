@@ -177,6 +177,54 @@ describe('QA reliability and edge-case scenarios', () => {
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
     expect(second.body?.data?.duplicate).toBe(true);
+    await expect(prisma.webhookEvent.count({
+      where: { provider: 'stripe', eventId: `evt_dup_${order.id}` },
+    })).resolves.toBe(1);
+    await expect(prisma.financialTransaction.count({
+      where: { sideEffectKey: `stripe-webhook:evt_dup_${order.id}` },
+    })).resolves.toBe(1);
+  });
+
+  test('concurrent webhook replay creates one receipt and one side effect', async () => {
+    const order = await createOrder({ paymentMethod: 'credit_card', totalAmount: 13 });
+    const eventId = `evt_concurrent_${order.id}`;
+    require('stripe')().webhooks.constructEvent.mockReturnValue({
+      id: eventId,
+      type: 'payment_intent.succeeded',
+      data: { object: { id: `pi_${order.id}`, metadata: { orderId: order.id } } },
+    });
+    const calls = await Promise.all([
+      request(app).post('/v1/payments/webhook').set('stripe-signature', 'sig').send('{}'),
+      request(app).post('/v1/payments/webhook').set('stripe-signature', 'sig').send('{}'),
+    ]);
+    expect(calls.every(({ status }) => status === 200)).toBe(true);
+    await expect(prisma.webhookEvent.count({ where: { provider: 'stripe', eventId } })).resolves.toBe(1);
+    await expect(prisma.financialTransaction.count({ where: { sideEffectKey: `stripe-webhook:${eventId}` } })).resolves.toBe(1);
+  });
+
+  test('webhook receipt rolls back when its financial side effect fails', async () => {
+    const order = await createOrder({ paymentMethod: 'credit_card', totalAmount: 14 });
+    const eventId = `evt_rollback_${order.id}`;
+    require('stripe')().webhooks.constructEvent.mockReturnValue({
+      id: eventId,
+      type: 'payment_intent.succeeded',
+      data: { object: { id: `pi_${order.id}`, metadata: { orderId: order.id } } },
+    });
+    await prisma.financialTransaction.create({
+      data: {
+        orderId: order.id,
+        transactionType: 'order_payment',
+        status: 'test-conflict',
+        amount: 0,
+        sideEffectKey: `stripe-webhook:${eventId}`,
+      },
+    });
+    const result = await request(app)
+      .post('/v1/payments/webhook')
+      .set('stripe-signature', 'sig')
+      .send('{}');
+    expect(result.status).toBe(500);
+    await expect(prisma.webhookEvent.count({ where: { provider: 'stripe', eventId } })).resolves.toBe(0);
   });
 
   test('prevents cumulative over-refund requests', async () => {

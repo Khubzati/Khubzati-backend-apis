@@ -1065,7 +1065,7 @@ const countRecentFailedOtpAttempts = async ({ userId = null, identifier = null }
   }
 };
 
-const resolveVendorStatusForUser = async (user) => {
+const resolveVendorStatusForUser = async (user, selectedVendorId = null) => {
   if (!user || (user.role !== 'bakery_owner' && user.role !== 'restaurant_owner')) {
     return null;
   }
@@ -1080,85 +1080,60 @@ const resolveVendorStatusForUser = async (user) => {
   };
 
   const deriveVendorStatusFromRecords = (records, vendorType) => {
+    const vendorEntities = (records || []).map((record) => {
+      const normalizedStatus = String(record.status || '').trim().toLowerCase();
+      return {
+        vendorType,
+        vendorId: record.id,
+        name: record.name || null,
+        status: normalizedStatus,
+        rejectionReason: record.rejectionReason || null,
+        rejectedAt: record.rejectedAt || null,
+      };
+    });
     if (!Array.isArray(records) || records.length === 0) {
       return {
         hasVendor: false,
         vendorApproved: false,
         vendorPending: false,
         vendorRejected: false,
+        vendorSuspended: false,
+        vendorInactive: false,
+        accountStatus: null,
         vendorType,
         vendorId: null,
         rejectionReason: null,
         rejectedAt: null,
+        currentVendorId: null,
+        vendorEntities,
       };
     }
 
     const normalizeStatus = (record) =>
       (record?.status || '').toString().trim().toLowerCase();
-    const statuses = records.map(normalizeStatus);
-    const hasApproved = statuses.some(
-      (status) => status === 'approved' || status === 'active'
-    );
-    const hasPending = statuses.some(
-      (status) => status === 'pending_approval' || status === 'pending'
-    );
-    const hasRejected = statuses.some((status) => status === 'rejected');
-    const pickLatestByStatus = (statusMatcher) => records.find((record) => statusMatcher(normalizeStatus(record)));
-
-    if (hasApproved) {
-      const approvedRecord = pickLatestByStatus((status) => status === 'approved' || status === 'active');
-      return {
-        hasVendor: true,
-        vendorApproved: true,
-        vendorPending: false,
-        vendorRejected: false,
-        vendorType,
-        vendorId: approvedRecord?.id || null,
-        rejectionReason: null,
-        rejectedAt: null,
-      };
-    }
-
-    if (hasPending) {
-      const pendingRecord = pickLatestByStatus(
-        (status) => status === 'pending_approval' || status === 'pending'
-      );
-      return {
-        hasVendor: true,
-        vendorApproved: false,
-        vendorPending: true,
-        vendorRejected: false,
-        vendorType,
-        vendorId: pendingRecord?.id || null,
-        rejectionReason: null,
-        rejectedAt: null,
-      };
-    }
-
-    if (hasRejected) {
-      const rejectedRecord = pickLatestByStatus((status) => status === 'rejected');
-      return {
-        hasVendor: true,
-        vendorApproved: false,
-        vendorPending: false,
-        vendorRejected: true,
-        vendorType,
-        vendorId: rejectedRecord?.id || null,
-        rejectionReason: rejectedRecord?.rejectionReason || null,
-        rejectedAt: rejectedRecord?.rejectedAt || null,
-      };
-    }
-
-    // Inactive-only records.
+    const selectedRecord =
+      records.find((record) => record.id === selectedVendorId) || records[0];
+    const rawStatus = normalizeStatus(selectedRecord);
+    const accountStatus =
+      rawStatus === 'active' ? 'approved' :
+      rawStatus === 'pending' ? 'pending_approval' :
+      rawStatus;
     return {
       hasVendor: true,
-      vendorApproved: false,
-      vendorPending: false,
-      vendorRejected: false,
+      vendorApproved: accountStatus === 'approved',
+      vendorPending: accountStatus === 'pending_approval',
+      vendorRejected: accountStatus === 'rejected',
+      vendorSuspended: accountStatus === 'suspended',
+      vendorInactive: accountStatus === 'inactive',
+      accountStatus: accountStatus || null,
       vendorType,
-      vendorId: records?.[0]?.id || null,
-      rejectionReason: null,
-      rejectedAt: null,
+      vendorId: selectedRecord.id,
+      currentVendorId: selectedRecord.id,
+      rejectionReason:
+        accountStatus === 'rejected' ? selectedRecord.rejectionReason || null : null,
+      rejectedAt:
+        accountStatus === 'rejected' ? selectedRecord.rejectedAt || null : null,
+      vendorEntities,
     };
   };
 
@@ -1168,6 +1143,7 @@ const resolveVendorStatusForUser = async (user) => {
         where: vendorOwnershipWhere,
         select: {
           id: true,
+          name: true,
           status: true,
           rejectionReason: true,
           rejectedAt: true,
@@ -1182,6 +1158,7 @@ const resolveVendorStatusForUser = async (user) => {
       where: vendorOwnershipWhere,
       select: {
         id: true,
+        name: true,
         status: true,
         rejectionReason: true,
         rejectedAt: true,
@@ -1201,10 +1178,15 @@ const resolveVendorStatusForUser = async (user) => {
       vendorApproved: false,
       vendorPending: false,
       vendorRejected: false,
+      vendorSuspended: false,
+      vendorInactive: false,
+      accountStatus: null,
       vendorType: user.role === 'bakery_owner' ? 'bakery' : 'restaurant',
       vendorId: null,
       rejectionReason: null,
       rejectedAt: null,
+      currentVendorId: null,
+      vendorEntities: [],
     };
   }
 };
@@ -1822,13 +1804,6 @@ router.post('/login', otpRouteLimiter, async (req, res) => {
       });
     }
 
-    if (!user.otp || !user.otpExpiry) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid or expired OTP',
-      });
-    }
-
     // Password login path (if password provided)
     if (password) {
       const validPassword = await bcrypt.compare(password, user.password);
@@ -1836,6 +1811,12 @@ router.post('/login', otpRouteLimiter, async (req, res) => {
         return res.status(401).json({ status: 'fail', message: 'Invalid credentials' });
       }
     } else {
+      if (!user.otp || !user.otpExpiry) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Invalid or expired OTP',
+        });
+      }
       const now = new Date();
       if (user.otp !== otp || user.otpExpiry < now) {
         return res.status(400).json({
@@ -2286,11 +2267,25 @@ router.get('/approval-status', authenticateToken, async (req, res) => {
       });
     }
 
-    const vendorStatus = await resolveVendorStatusForUser(user);
+    const selectedVendorId = String(
+      req.query.vendorId || req.headers['x-vendor-id'] || '',
+    ).trim() || null;
+    const vendorStatus = await resolveVendorStatusForUser(user, selectedVendorId);
+    if (
+      selectedVendorId &&
+      !vendorStatus?.vendorEntities?.some(
+        (entity) => entity.vendorId === selectedVendorId,
+      )
+    ) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Selected vendor is not owned by this account',
+      });
+    }
     const requiresApproval = !!(
       vendorStatus &&
       vendorStatus.hasVendor &&
-      (vendorStatus.vendorPending || vendorStatus.vendorRejected)
+      !vendorStatus.vendorApproved
     );
 
     return res.status(200).json({

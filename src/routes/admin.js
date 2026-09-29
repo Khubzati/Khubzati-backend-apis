@@ -1542,6 +1542,11 @@ router.put('/users/:id/role', async (req, res) => {
             }
         });
 
+        await logAuditEvent({
+            prisma, req, action: 'user.role_changed', entityType: 'user', entityId: id,
+            metadata: { from: user.role, to: role },
+        });
+
         return res.status(200).json({
             status: 'success',
             message: `User role changed to ${role} successfully`
@@ -2007,7 +2012,9 @@ const upsertVendorStatus = async (id, status) => {
                 deletedAt: null,
                 ...(status === 'approved'
                     ? { rejectionReason: null, rejectedAt: null }
-                    : { rejectedAt: new Date() }),
+                    : status === 'rejected'
+                      ? { rejectedAt: new Date() }
+                      : {}),
             },
         });
     }
@@ -2020,7 +2027,9 @@ const upsertVendorStatus = async (id, status) => {
                 deletedAt: null,
                 ...(status === 'approved'
                     ? { rejectionReason: null, rejectedAt: null }
-                    : { rejectedAt: new Date() }),
+                    : status === 'rejected'
+                      ? { rejectedAt: new Date() }
+                      : {}),
             },
         });
     }
@@ -2031,10 +2040,13 @@ const upsertVendorStatus = async (id, status) => {
     router.put(`/vendors/:vendorId/${action}`, async (req, res) => {
         try {
             const statusMap = {
-                suspend: 'rejected', // Prisma enum only supports approved/pending_approval/rejected
+                suspend: 'suspended',
                 activate: 'approved',
             };
             await upsertVendorStatus(req.params.vendorId, statusMap[action]);
+            await logAuditEvent({
+                prisma, req, action: `vendor.${action}d`, entityType: 'vendor', entityId: req.params.vendorId,
+            });
             return res.status(200).json({ status: 'success', message: `Vendor ${action}d` });
         } catch (error) {
             console.error(`${action} vendor error:`, error);
@@ -2190,6 +2202,9 @@ router.put('/vendors/:id/approve', async (req, res) => {
                     });
                 }
             }
+            await logAuditEvent({
+                prisma, req, action: 'vendor.approved', entityType: 'bakery', entityId: id,
+            });
             return res.status(200).json({
                 status: 'success',
                 message: 'Vendor approved successfully'
@@ -2224,6 +2239,9 @@ router.put('/vendors/:id/approve', async (req, res) => {
                     });
                 }
             }
+            await logAuditEvent({
+                prisma, req, action: 'vendor.approved', entityType: 'restaurant', entityId: id,
+            });
             return res.status(200).json({
                 status: 'success',
                 message: 'Vendor approved successfully'
@@ -2265,6 +2283,9 @@ router.put('/vendors/:id/approve', async (req, res) => {
                     isVerified: true,
                     updatedBy: req.user.id
                 }
+            });
+            await logAuditEvent({
+                prisma, req, action: 'vendor.approved', entityType: 'bakery_owner_account', entityId: id,
             });
             return res.status(200).json({
                 status: 'success',
@@ -2324,6 +2345,9 @@ router.put('/vendors/:id/reject', async (req, res) => {
                     });
                 }
             }
+            await logAuditEvent({
+                prisma, req, action: 'vendor.rejected', entityType: 'bakery', entityId: id, metadata: { reason },
+            });
             return res.status(200).json({
                 status: 'success',
                 message: 'Vendor rejected successfully'
@@ -2358,6 +2382,9 @@ router.put('/vendors/:id/reject', async (req, res) => {
                     });
                 }
             }
+            await logAuditEvent({
+                prisma, req, action: 'vendor.rejected', entityType: 'restaurant', entityId: id, metadata: { reason },
+            });
             return res.status(200).json({
                 status: 'success',
                 message: 'Vendor rejected successfully'
@@ -2397,6 +2424,9 @@ router.put('/vendors/:id/reject', async (req, res) => {
             //     where: { id },
             //     data: { deletedAt: new Date(), updatedBy: req.user.id }
             // });
+            await logAuditEvent({
+                prisma, req, action: 'vendor.rejected', entityType: 'bakery_owner_account', entityId: id, metadata: { reason },
+            });
             return res.status(200).json({
                 status: 'success',
                 message: 'Bakery owner and associated bakeries rejected successfully'
@@ -2588,6 +2618,13 @@ router.put('/orders/:orderId/status', async (req, res) => {
                 });
             }
 
+            // Written inside the transaction (via tx) so the audit row
+            // commits/rolls back atomically with the order status change.
+            await logAuditEvent({
+                prisma: tx, req, action: 'order.status_changed', entityType: 'order', entityId: req.params.orderId,
+                metadata: { from: existingOrder.status, to: resolvedStatus },
+            });
+
             return nextOrder;
         });
 
@@ -2643,6 +2680,10 @@ router.post('/orders/:orderId/cancel', async (req, res) => {
                 },
             });
 
+            await logAuditEvent({
+                prisma: tx, req, action: 'order.cancelled', entityType: 'order', entityId: req.params.orderId,
+            });
+
             return nextOrder;
         });
 
@@ -2653,6 +2694,171 @@ router.post('/orders/:orderId/cancel', async (req, res) => {
     } catch (error) {
         console.error('Admin cancel order error:', error);
         return res.status(500).json({ status: 'error', message: 'An error occurred while cancelling order' });
+    }
+});
+
+// ---------------------------------------------------------------------------
+// Banner / content management. Backs the admin console's /content page —
+// persisted here rather than kept as client-only state so it survives
+// refreshes and deployments.
+// ---------------------------------------------------------------------------
+
+const validateBannerPayload = (body, { partial = false } = {}) => {
+    const errors = [];
+    const data = {};
+
+    const titleEn = body?.titleEn !== undefined ? String(body.titleEn).trim() : undefined;
+    const titleAr = body?.titleAr !== undefined ? String(body.titleAr).trim() : undefined;
+    const imageUrl = body?.imageUrl !== undefined ? String(body.imageUrl).trim() : undefined;
+
+    if (!partial || titleEn !== undefined) {
+        if (!titleEn) errors.push('titleEn is required');
+        else data.titleEn = titleEn;
+    }
+    if (!partial || titleAr !== undefined) {
+        if (!titleAr) errors.push('titleAr is required');
+        else data.titleAr = titleAr;
+    }
+    if (!partial || imageUrl !== undefined) {
+        if (!imageUrl) errors.push('imageUrl is required');
+        else data.imageUrl = imageUrl;
+    }
+
+    if (body?.navigationTarget !== undefined) {
+        const target = String(body.navigationTarget || '').trim();
+        data.navigationTarget = target || null;
+    }
+
+    if (body?.isActive !== undefined) {
+        if (typeof body.isActive !== 'boolean') {
+            errors.push('isActive must be a boolean');
+        } else {
+            data.isActive = body.isActive;
+        }
+    }
+
+    if (body?.sortPriority !== undefined) {
+        const priority = Number(body.sortPriority);
+        if (!Number.isInteger(priority)) {
+            errors.push('sortPriority must be an integer');
+        } else {
+            data.sortPriority = priority;
+        }
+    }
+
+    let startDate = null;
+    let endDate = null;
+    if (body?.startDate !== undefined) {
+        if (body.startDate === null || body.startDate === '') {
+            data.startDate = null;
+        } else {
+            startDate = new Date(body.startDate);
+            if (Number.isNaN(startDate.getTime())) errors.push('startDate is not a valid date');
+            else data.startDate = startDate;
+        }
+    }
+    if (body?.endDate !== undefined) {
+        if (body.endDate === null || body.endDate === '') {
+            data.endDate = null;
+        } else {
+            endDate = new Date(body.endDate);
+            if (Number.isNaN(endDate.getTime())) errors.push('endDate is not a valid date');
+            else data.endDate = endDate;
+        }
+    }
+    if (startDate && endDate && endDate < startDate) {
+        errors.push('endDate must not be before startDate');
+    }
+
+    return { errors, data };
+};
+
+// List banners (admin sees all, including inactive/expired, for management)
+router.get('/banners', async (req, res) => {
+    try {
+        const banners = await prisma.banner.findMany({
+            where: { deletedAt: null },
+            orderBy: [{ sortPriority: 'asc' }, { createdAt: 'desc' }],
+        });
+        return res.status(200).json({ status: 'success', data: { banners } });
+    } catch (error) {
+        console.error('List banners error:', error);
+        return res.status(500).json({ status: 'error', message: 'An error occurred while fetching banners' });
+    }
+});
+
+router.post('/banners', async (req, res) => {
+    try {
+        const { errors, data } = validateBannerPayload(req.body, { partial: false });
+        if (errors.length) {
+            return res.status(400).json({ status: 'fail', message: errors.join(', ') });
+        }
+
+        const banner = await prisma.banner.create({
+            data: { ...data, createdBy: req.user.id, updatedBy: req.user.id },
+        });
+
+        await logAuditEvent({
+            prisma, req, action: 'banner.created', entityType: 'banner', entityId: banner.id,
+        });
+
+        return res.status(201).json({ status: 'success', data: { banner } });
+    } catch (error) {
+        console.error('Create banner error:', error);
+        return res.status(500).json({ status: 'error', message: 'An error occurred while creating the banner' });
+    }
+});
+
+router.put('/banners/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const existing = await prisma.banner.findFirst({ where: { id, deletedAt: null } });
+        if (!existing) {
+            return res.status(404).json({ status: 'fail', message: 'Banner not found' });
+        }
+
+        const { errors, data } = validateBannerPayload(req.body, { partial: true });
+        if (errors.length) {
+            return res.status(400).json({ status: 'fail', message: errors.join(', ') });
+        }
+
+        const banner = await prisma.banner.update({
+            where: { id },
+            data: { ...data, updatedBy: req.user.id },
+        });
+
+        await logAuditEvent({
+            prisma, req, action: 'banner.updated', entityType: 'banner', entityId: id,
+        });
+
+        return res.status(200).json({ status: 'success', data: { banner } });
+    } catch (error) {
+        console.error('Update banner error:', error);
+        return res.status(500).json({ status: 'error', message: 'An error occurred while updating the banner' });
+    }
+});
+
+router.delete('/banners/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const existing = await prisma.banner.findFirst({ where: { id, deletedAt: null } });
+        if (!existing) {
+            return res.status(404).json({ status: 'fail', message: 'Banner not found' });
+        }
+
+        await prisma.banner.update({
+            where: { id },
+            data: { deletedAt: new Date(), updatedBy: req.user.id },
+        });
+
+        await logAuditEvent({
+            prisma, req, action: 'banner.deleted', entityType: 'banner', entityId: id,
+        });
+
+        return res.status(200).json({ status: 'success', message: 'Banner deleted' });
+    } catch (error) {
+        console.error('Delete banner error:', error);
+        return res.status(500).json({ status: 'error', message: 'An error occurred while deleting the banner' });
     }
 });
 

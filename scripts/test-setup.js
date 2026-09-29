@@ -242,8 +242,8 @@ async function seed() {
     if (entry) entry.value = val; else env.values.push({ key, value: val, enabled: true });
   };
 
-  setVal('base_url', 'http://localhost:3000');
-  setVal('baseUrl', 'http://localhost:3000');
+  setVal('base_url', 'https://api.khubzati.com');
+  setVal('baseUrl', 'https://api.khubzati.com');
   setVal('auth_token', customerToken);
   setVal('authToken', customerToken);
   setVal('admin_token', adminToken);

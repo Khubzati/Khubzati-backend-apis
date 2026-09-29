@@ -50,7 +50,13 @@ describe('KPI aggregation + SLA alerts + notification queue integration', () => 
   });
 
   afterAll(async () => {
-    await prisma.slaAlertDeliveryAttempt.deleteMany({ where: { delivery: { eventType: { contains: 'qa' } } } }).catch(() => null);
+    const qaDeliveries = await prisma.slaAlertDelivery.findMany({
+      where: { eventType: { contains: 'qa' } },
+      select: { id: true },
+    }).catch(() => []);
+    await prisma.slaAlertDeliveryAttempt.deleteMany({
+      where: { deliveryId: { in: qaDeliveries.map(({ id }) => id) } },
+    }).catch(() => null);
     await prisma.slaAlertDeadLetter.deleteMany({ where: { eventType: { contains: 'qa' } } }).catch(() => null);
     await prisma.slaAlertDelivery.deleteMany({ where: { eventType: { contains: 'qa' } } }).catch(() => null);
     await prisma.slaAlertEvent.deleteMany({ where: { alertType: { in: Object.values(ALERT_TYPES) } } }).catch(() => null);

@@ -2,10 +2,13 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
 const { authenticateTokenOptional } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rate-limit');
 const { logUploadAudit } = require('../services/uploadAuditService');
+const { scanUploadedFile } = require('../services/malwareScanService');
 
 const router = express.Router();
 const uploadStorageDriver = String(process.env.UPLOAD_STORAGE_DRIVER || 'local').trim().toLowerCase();
@@ -16,6 +19,117 @@ const uploadRateLimiter = createRateLimiter({
   maxRequests: Number(process.env.UPLOAD_RATE_LIMIT_PER_MINUTE || 60),
   message: 'Too many upload requests. Please try again later.',
 });
+const onboardingTokenRateLimiter = createRateLimiter({
+  keyPrefix: 'upload:onboarding-token',
+  windowMs: 60 * 1000,
+  maxRequests: Number(process.env.ONBOARDING_UPLOAD_TOKEN_RATE_LIMIT_PER_MINUTE || 10),
+});
+
+const onboardingSecret = () =>
+  process.env.ONBOARDING_UPLOAD_TOKEN_SECRET ||
+  process.env.JWT_SECRET ||
+  'dev-temp-secret-change-me';
+const allowedOnboardingPurposes = new Set([
+  'commercial_registry',
+  'vendor_logo',
+  'vendor_cover',
+  'identity_document',
+]);
+
+router.post('/onboarding-token', onboardingTokenRateLimiter, async (req, res) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const role = String(req.body?.role || '').trim().toLowerCase();
+  const purpose = String(req.body?.purpose || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    return res.status(400).json({ status: 'fail', message: 'A valid onboarding email is required' });
+  }
+  if (!['bakery_owner', 'restaurant_owner'].includes(role) || !allowedOnboardingPurposes.has(purpose)) {
+    return res.status(400).json({ status: 'fail', message: 'Invalid onboarding role or upload purpose' });
+  }
+  const subject = crypto.createHash('sha256').update(`${role}:${email}`).digest('hex');
+  const expiresInSeconds = Math.min(
+    Math.max(Number(process.env.ONBOARDING_UPLOAD_TOKEN_TTL_SECONDS || 600), 60),
+    900,
+  );
+  const tokenId = crypto.randomUUID();
+  const token = jwt.sign(
+    { type: 'onboarding_upload', purpose, role, email, subject },
+    onboardingSecret(),
+    { expiresIn: expiresInSeconds, jwtid: tokenId },
+  );
+  await prisma.onboardingUploadSession.create({
+    data: {
+      tokenId,
+      subjectHash: subject,
+      email,
+      role,
+      purpose,
+      expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
+    },
+  });
+  return res.status(201).json({
+    status: 'success',
+    data: { token, purpose, expiresInSeconds },
+  });
+});
+
+const resolveOnboardingUpload = (req) => {
+  const token = String(req.headers['x-onboarding-upload-token'] || '').trim();
+  if (!token) return null;
+  try {
+    const payload = jwt.verify(token, onboardingSecret(), { algorithms: ['HS256'] });
+    if (
+      payload?.type !== 'onboarding_upload' ||
+      !allowedOnboardingPurposes.has(payload?.purpose)
+    ) return null;
+    return payload;
+  } catch (_) {
+    return null;
+  }
+};
+
+const enforceOnboardingMime = async (req, file) => {
+  if (!req.onboardingUpload) return;
+  const allowed = req.onboardingUpload.purpose === 'commercial_registry' ||
+    req.onboardingUpload.purpose === 'identity_document'
+    ? new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/webp'])
+    : new Set(['image/jpeg', 'image/png', 'image/webp']);
+  if (!allowed.has(file.mimetype)) {
+    await fs.promises.unlink(file.path).catch(() => {});
+    throw Object.assign(new Error('File type is not allowed for this onboarding purpose'), {
+      statusCode: 415,
+    });
+  }
+};
+
+const requireAuthenticatedUpload = async (req, res, next) => {
+  if (req.user?.id) return next();
+  const onboarding = resolveOnboardingUpload(req);
+  if (onboarding) {
+    const session = await prisma.onboardingUploadSession.findUnique({
+      where: { tokenId: onboarding.jti },
+    });
+    if (
+      !session ||
+      session.consumedAt ||
+      session.cleanedAt ||
+      session.fileUrl ||
+      session.expiresAt <= new Date()
+    ) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Onboarding upload token is expired, consumed, or already used',
+      });
+    }
+    req.onboardingUpload = onboarding;
+    req.onboardingUploadSession = session;
+    return next();
+  }
+  return res.status(401).json({
+    status: 'fail',
+    message: 'Authentication or a valid onboarding upload token is required',
+  });
+};
 
 // Create uploads directory if it doesn't exist
 const uploadsDir = path.join(__dirname, '../../uploads');
@@ -245,15 +359,15 @@ const resolveUploadOwnership = async (req) => {
   const ownerId = String(req.body?.ownerId || req.body?.owner_id || req.user?.id || '').trim();
 
   if (!isAuthenticated) {
-    if (ownerType === 'bakery' || ownerType === 'restaurant') {
-      return {
-        valid: false,
-        message: 'Authentication is required for bakery or restaurant ownership uploads',
-      };
+    if (!req.onboardingUpload) {
+      return { valid: false, message: 'A valid onboarding upload token is required' };
     }
-
-    // Registration and onboarding flows can upload documents before login.
-    return { valid: true, ownerType: 'anonymous', ownerId: null };
+    return {
+      valid: true,
+      ownerType: 'onboarding',
+      ownerId: req.onboardingUpload.subject,
+      purpose: req.onboardingUpload.purpose,
+    };
   }
 
   if (!ownerId) {
@@ -305,7 +419,7 @@ const resolveUploadOwnership = async (req) => {
 };
 
 // Upload single file
-router.post('/document', authenticateTokenOptional, uploadRateLimiter, upload.single('file'), async (req, res) => {
+router.post('/document', authenticateTokenOptional, requireAuthenticatedUpload, uploadRateLimiter, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -325,6 +439,15 @@ router.post('/document', authenticateTokenOptional, uploadRateLimiter, upload.si
     const normalizedFile = await normalizeUploadedFile(req.file, {
       imagesOnly: false,
     });
+    await enforceOnboardingMime(req, normalizedFile);
+    const scan = await scanUploadedFile({
+      filePath: normalizedFile.path,
+      mimeType: normalizedFile.mimetype,
+    });
+    if (!scan.clean) {
+      await fs.promises.unlink(normalizedFile.path).catch(() => {});
+      return res.status(422).json({ status: 'fail', message: 'Uploaded file failed security scanning' });
+    }
     const fileUrl = `/uploads/${normalizedFile.filename}`;
     
     // In production, you would upload to S3/Cloud Storage and return the CDN URL
@@ -342,6 +465,12 @@ router.post('/document', authenticateTokenOptional, uploadRateLimiter, upload.si
       fileSize: normalizedFile.size,
       sourceRoute: req.path,
     });
+    if (req.onboardingUploadSession) {
+      await prisma.onboardingUploadSession.update({
+        where: { id: req.onboardingUploadSession.id },
+        data: { fileUrl },
+      });
+    }
 
     return res.status(200).json({
       status: 'success',
@@ -364,15 +493,15 @@ router.post('/document', authenticateTokenOptional, uploadRateLimiter, upload.si
         });
       }
     }
-    return res.status(500).json({
-      status: 'error',
+    return res.status(error.statusCode || 500).json({
+      status: error.statusCode ? 'fail' : 'error',
       message: error.message || 'An error occurred while uploading file'
     });
   }
 });
 
 // Upload single image only (for UI image selectors such as bread type thumbnails)
-router.post('/image', authenticateTokenOptional, uploadRateLimiter, uploadImageOnly.single('file'), async (req, res) => {
+router.post('/image', authenticateTokenOptional, requireAuthenticatedUpload, uploadRateLimiter, uploadImageOnly.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -392,6 +521,15 @@ router.post('/image', authenticateTokenOptional, uploadRateLimiter, uploadImageO
     const normalizedFile = await normalizeUploadedFile(req.file, {
       imagesOnly: true,
     });
+    await enforceOnboardingMime(req, normalizedFile);
+    const scan = await scanUploadedFile({
+      filePath: normalizedFile.path,
+      mimeType: normalizedFile.mimetype,
+    });
+    if (!scan.clean) {
+      await fs.promises.unlink(normalizedFile.path).catch(() => {});
+      return res.status(422).json({ status: 'fail', message: 'Uploaded file failed security scanning' });
+    }
     const fileUrl = `/uploads/${normalizedFile.filename}`;
 
     await logUploadAudit({
@@ -406,6 +544,12 @@ router.post('/image', authenticateTokenOptional, uploadRateLimiter, uploadImageO
       fileSize: normalizedFile.size,
       sourceRoute: req.path,
     });
+    if (req.onboardingUploadSession) {
+      await prisma.onboardingUploadSession.update({
+        where: { id: req.onboardingUploadSession.id },
+        data: { fileUrl },
+      });
+    }
 
     return res.status(200).json({
       status: 'success',
@@ -427,16 +571,22 @@ router.post('/image', authenticateTokenOptional, uploadRateLimiter, uploadImageO
       });
     }
 
-    return res.status(500).json({
-      status: 'error',
+    return res.status(error.statusCode || 500).json({
+      status: error.statusCode ? 'fail' : 'error',
       message: error.message || 'An error occurred while uploading image',
     });
   }
 });
 
 // Upload multiple files
-router.post('/documents', authenticateTokenOptional, uploadRateLimiter, upload.array('files', 5), async (req, res) => {
+router.post('/documents', authenticateTokenOptional, requireAuthenticatedUpload, uploadRateLimiter, upload.array('files', 5), async (req, res) => {
   try {
+    if (req.onboardingUpload) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Onboarding tokens authorize exactly one file upload',
+      });
+    }
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({
         status: 'fail',
@@ -455,6 +605,14 @@ router.post('/documents', authenticateTokenOptional, uploadRateLimiter, upload.a
     const normalizedFiles = await Promise.all(
       req.files.map((file) => normalizeUploadedFile(file, { imagesOnly: false })),
     );
+    for (const file of normalizedFiles) await enforceOnboardingMime(req, file);
+    for (const file of normalizedFiles) {
+      const scan = await scanUploadedFile({ filePath: file.path, mimeType: file.mimetype });
+      if (!scan.clean) {
+        await Promise.all(normalizedFiles.map((entry) => fs.promises.unlink(entry.path).catch(() => {})));
+        return res.status(422).json({ status: 'fail', message: 'An uploaded file failed security scanning' });
+      }
+    }
 
     const uploadedFiles = [];
     for (const file of normalizedFiles) {

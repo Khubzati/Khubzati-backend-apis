@@ -25,8 +25,15 @@ describe('Vendor rejection + document resubmission flow', () => {
     admin = await prisma.user.findUnique({
       where: { email: process.env.ADMIN_EMAIL || 'admin@khubzati.com' },
     });
-    bakeryOwner = await prisma.user.findUnique({
-      where: { email: 'bakery_owner@example.com' },
+    bakeryOwner = await prisma.user.create({
+      data: {
+        username: `rejection_owner_${Date.now()}`,
+        email: `rejection_owner_${Date.now()}@example.com`,
+        phoneNumber: `+96278${String(Date.now()).slice(-7)}`,
+        password: 'test-only-password-hash',
+        role: 'bakery_owner',
+        isVerified: true,
+      },
     });
 
     adminToken = asToken(admin);
@@ -39,6 +46,13 @@ describe('Vendor rejection + document resubmission flow', () => {
         where: { id: { in: createdBakeryIds.splice(0, createdBakeryIds.length) } },
       });
     }
+  });
+
+  afterAll(async () => {
+    if (bakeryOwner?.id) {
+      await prisma.user.delete({ where: { id: bakeryOwner.id } });
+    }
+    await prisma.$disconnect();
   });
 
   test('reject requires reason and persists rejection metadata', async () => {
