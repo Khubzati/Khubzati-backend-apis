@@ -76,6 +76,7 @@ describe('Extended security regression tests', () => {
 
   afterAll(async () => {
     await prisma.address.deleteMany({ where: { id: { in: createdAddresses } } }).catch(() => null);
+    await prisma.notification.deleteMany({ where: { userId: { in: createdUsers } } }).catch(() => null);
     await prisma.user.deleteMany({ where: { id: { in: createdUsers } } }).catch(() => null);
   });
 

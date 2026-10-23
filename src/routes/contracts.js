@@ -3,6 +3,12 @@ const prisma = require('../lib/prisma');
 const { authenticateTokenOptional, authenticateToken, authorizeRole } = require('../middleware/auth');
 
 const router = express.Router();
+const isContractsInfraMissingError = (error) => {
+  if (!error || typeof error !== 'object') return false;
+  if (error.code === 'P2021' || error.code === 'P2022') return true;
+  const text = String(error.message || '').toLowerCase();
+  return text.includes('api_contract_versions') || text.includes('client_error_events');
+};
 
 router.get('/versions', async (_req, res) => {
   try {
@@ -17,6 +23,12 @@ router.get('/versions', async (_req, res) => {
       data: { versions },
     });
   } catch (error) {
+    if (isContractsInfraMissingError(error)) {
+      return res.status(200).json({
+        status: 'success',
+        data: { versions: [] },
+      });
+    }
     console.error('List API contract versions error:', error);
     return res.status(500).json({ status: 'error', message: 'Unable to list API contract versions' });
   }

@@ -13,7 +13,21 @@ const { enqueueNotificationJob } = require('../services/notificationQueueService
 const { logAuditEvent } = require('../services/auditLogService');
 
 const router = express.Router();
+const paginationFrom = (query) => {
+  const page = Math.max(Number.parseInt(query?.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(Number.parseInt(query?.limit, 10) || 25, 1), 100);
+  return { page, limit, skip: (page - 1) * limit };
+};
+const selectedVendorIdFrom = (req) =>
+  String(req.headers['x-vendor-id'] || '').trim() || null;
 const stripeProvider = new StripePaymentProvider();
+const advisoryLockId = (value) => {
+  let hash = 0;
+  for (const code of Buffer.from(String(value))) hash = ((hash * 31) + code) | 0;
+  return hash;
+};
+const idempotencyKeyFrom = (req) =>
+  String(req.headers['idempotency-key'] || req.body?.idempotencyKey || '').trim() || null;
 
 const isAdmin = (req) => req.user?.role === 'admin';
 const isVendorOwnerRole = (role) => role === 'bakery_owner' || role === 'restaurant_owner';
@@ -58,6 +72,7 @@ const appendVendorLedgerEntry = async ({
   payoutRequestId = null,
   settlementBatchId = null,
   entryType,
+  sideEffectKey = null,
   amount,
   currency = 'JOD',
   description = null,
@@ -72,6 +87,7 @@ const appendVendorLedgerEntry = async ({
         payoutRequestId,
         settlementBatchId,
         entryType,
+        sideEffectKey,
         amount: toMoney(amount),
         currency,
         description,
@@ -233,52 +249,65 @@ router.post('/refunds', authenticateToken, async (req, res) => {
       return res.status(400).json({ status: 'fail', message: 'Invalid refund amount' });
     }
 
-    const existingRefunds = await prisma.refundRequest.aggregate({
-      _sum: { amount: true },
-      where: {
-        orderId: order.id,
-        status: { in: ['pending', 'approved', 'processing', 'completed'] },
-      },
-    });
-    const alreadyRequestedAmount = toMoney(existingRefunds._sum.amount || 0);
-    if (toMoney(alreadyRequestedAmount + numericAmount) > toMoney(order.totalAmount)) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Refund amount exceeds the remaining refundable order balance',
+    const idempotencyKey = idempotencyKeyFrom(req);
+    const refund = await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        'SELECT pg_advisory_xact_lock($1)',
+        advisoryLockId(`refund-order:${order.id}`),
+      );
+      if (idempotencyKey) {
+        const replay = await tx.refundRequest.findUnique({
+          where: { requesterUserId_idempotencyKey: { requesterUserId: req.user.id, idempotencyKey } },
+        });
+        if (replay) return replay;
+      }
+      const existingRefunds = await tx.refundRequest.aggregate({
+        _sum: { amount: true },
+        where: {
+          orderId: order.id,
+          status: { in: ['pending', 'approved', 'processing', 'completed'] },
+        },
       });
-    }
-
-    const refund = await prisma.refundRequest.create({
-      data: {
+      const alreadyRequestedAmount = toMoney(existingRefunds._sum.amount || 0);
+      if (toMoney(alreadyRequestedAmount + numericAmount) > toMoney(order.totalAmount)) {
+        throw Object.assign(
+          new Error('Refund amount exceeds the remaining refundable order balance'),
+          { statusCode: 400 },
+        );
+      }
+      const created = await tx.refundRequest.create({
+        data: {
+          orderId: order.id,
+          requesterUserId: req.user.id,
+          requesterRole: req.user.role,
+          amount: numericAmount,
+          reason: String(reason).trim(),
+          status: isAdmin(req) ? 'approved' : 'pending',
+          approvedByUserId: isAdmin(req) ? req.user.id : null,
+          approvedAt: isAdmin(req) ? new Date() : null,
+          idempotencyKey,
+        },
+      });
+      await appendFinancialTransaction({
+        prisma: tx,
         orderId: order.id,
-        requesterUserId: req.user.id,
-        requesterRole: req.user.role,
+        refundRequestId: created.id,
+        transactionType: 'refund',
+        status: created.status,
         amount: numericAmount,
-        reason: String(reason).trim(),
-        status: isAdmin(req) ? 'approved' : 'pending',
-        approvedByUserId: isAdmin(req) ? req.user.id : null,
-        approvedAt: isAdmin(req) ? new Date() : null,
-      },
-    });
-
-    await appendFinancialTransaction({
-      prisma,
-      orderId: order.id,
-      refundRequestId: refund.id,
-      transactionType: 'refund',
-      status: refund.status,
-      amount: numericAmount,
-      currency: order.currency || 'JOD',
-      metadata: { reason: refund.reason },
-    });
-
-    await logAuditEvent({
-      prisma,
-      req,
-      action: 'finance.refund.requested',
-      entityType: 'refund_request',
-      entityId: refund.id,
-      metadata: { orderId: order.id, amount: numericAmount, status: refund.status },
+        currency: order.currency || 'JOD',
+        sideEffectKey: `refund-request:${created.id}`,
+        metadata: { reason: created.reason },
+      });
+      await logAuditEvent({
+        prisma: tx,
+        req,
+        action: 'finance.refund.requested',
+        entityType: 'refund_request',
+        entityId: created.id,
+        metadata: { orderId: order.id, amount: numericAmount, status: created.status },
+      });
+      return created;
     });
 
     if (!isAdmin(req)) {
@@ -304,13 +333,18 @@ router.post('/refunds', authenticateToken, async (req, res) => {
     return res.status(201).json({ status: 'success', data: { refund } });
   } catch (error) {
     console.error('Create refund request error:', error);
-    return res.status(500).json({ status: 'error', message: 'Unable to create refund request' });
+    return res.status(error.statusCode || 500).json({
+      status: error.statusCode ? 'fail' : 'error',
+      message: error.statusCode ? error.message : 'Unable to create refund request',
+    });
   }
 });
 
 router.get('/refunds', authenticateToken, async (req, res) => {
   try {
     const where = {};
+    const { page, limit, skip } = paginationFrom(req.query);
+    if (req.query.status) where.status = String(req.query.status);
     if (!isAdmin(req)) {
       if (req.user.role === 'customer') {
         where.requesterUserId = req.user.id;
@@ -323,15 +357,20 @@ router.get('/refunds', authenticateToken, async (req, res) => {
       }
     }
 
-    const refunds = await prisma.refundRequest.findMany({
-      where,
-      include: {
-        order: true,
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-    });
-    return res.status(200).json({ status: 'success', data: { refunds } });
+    const [refunds, total] = await Promise.all([
+      prisma.refundRequest.findMany({
+        where,
+        include: { order: true },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.refundRequest.count({ where }),
+    ]);
+    return res.status(200).json({ status: 'success', data: {
+      refunds,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    } });
   } catch (error) {
     console.error('List refunds error:', error);
     return res.status(500).json({ status: 'error', message: 'Unable to list refunds' });
@@ -578,20 +617,22 @@ router.post('/disputes', authenticateToken, authorizeRole(['customer']), async (
 router.get('/disputes', authenticateToken, async (req, res) => {
   try {
     const where = {};
+    const { page, limit, skip } = paginationFrom(req.query);
+    if (req.query.status) where.status = String(req.query.status);
     if (!isAdmin(req)) {
       if (req.user.role === 'customer') {
         where.customerId = req.user.id;
       } else if (req.user.role === 'bakery_owner') {
         where.vendorType = 'bakery';
         const bakery = await prisma.bakery.findFirst({
-          where: { ownerId: req.user.id, deletedAt: null },
+          where: { ownerId: req.user.id, deletedAt: null, ...(selectedVendorIdFrom(req) ? { id: selectedVendorIdFrom(req) } : {}) },
           select: { id: true },
         });
         where.vendorId = bakery?.id || '__none__';
       } else if (req.user.role === 'restaurant_owner') {
         where.vendorType = 'restaurant';
         const restaurant = await prisma.restaurant.findFirst({
-          where: { ownerId: req.user.id, deletedAt: null },
+          where: { ownerId: req.user.id, deletedAt: null, ...(selectedVendorIdFrom(req) ? { id: selectedVendorIdFrom(req) } : {}) },
           select: { id: true },
         });
         where.vendorId = restaurant?.id || '__none__';
@@ -600,16 +641,21 @@ router.get('/disputes', authenticateToken, async (req, res) => {
       }
     }
 
-    const disputes = await prisma.disputeCase.findMany({
-      where,
-      include: {
-        messages: { orderBy: { createdAt: 'asc' } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-    });
+    const [disputes, total] = await Promise.all([
+      prisma.disputeCase.findMany({
+        where,
+        include: { messages: { orderBy: { createdAt: 'asc' } } },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.disputeCase.count({ where }),
+    ]);
 
-    return res.status(200).json({ status: 'success', data: { disputes } });
+    return res.status(200).json({ status: 'success', data: {
+      disputes,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    } });
   } catch (error) {
     console.error('List disputes error:', error);
     return res.status(500).json({ status: 'error', message: 'Unable to list disputes' });
@@ -727,100 +773,127 @@ router.post('/payouts/request', authenticateToken, authorizeRole(['bakery_owner'
 
     const vendorType = req.user.role === 'bakery_owner' ? 'bakery' : 'restaurant';
     const vendor = vendorType === 'bakery'
-      ? await prisma.bakery.findFirst({ where: { ownerId: req.user.id, deletedAt: null } })
-      : await prisma.restaurant.findFirst({ where: { ownerId: req.user.id, deletedAt: null } });
+      ? await prisma.bakery.findFirst({ where: { ownerId: req.user.id, deletedAt: null, ...(selectedVendorIdFrom(req) ? { id: selectedVendorIdFrom(req) } : {}) } })
+      : await prisma.restaurant.findFirst({ where: { ownerId: req.user.id, deletedAt: null, ...(selectedVendorIdFrom(req) ? { id: selectedVendorIdFrom(req) } : {}) } });
 
     if (!vendor) {
       return res.status(404).json({ status: 'fail', message: `${vendorType} profile not found` });
     }
 
-    const availableBalance = await getVendorAvailableBalance({
-      prisma,
-      vendorType,
-      vendorId: vendor.id,
-    });
-
-    if (amount > availableBalance) {
-      return res.status(400).json({
-        status: 'fail',
-        message: `Requested payout exceeds available balance (${availableBalance})`,
-      });
-    }
-
-    const payout = await prisma.payoutRequest.create({
-      data: {
+    const idempotencyKey = idempotencyKeyFrom(req);
+    const payout = await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        'SELECT pg_advisory_xact_lock($1)',
+        advisoryLockId(`payout-vendor:${vendorType}:${vendor.id}`),
+      );
+      if (idempotencyKey) {
+        const replay = await tx.payoutRequest.findUnique({
+          where: {
+            vendorType_vendorId_idempotencyKey: {
+              vendorType,
+              vendorId: vendor.id,
+              idempotencyKey,
+            },
+          },
+        });
+        if (replay) return replay;
+      }
+      const availableBalance = await getVendorAvailableBalance({
+        prisma: tx,
         vendorType,
         vendorId: vendor.id,
-        requesterUserId: req.user.id,
+      });
+      if (amount > availableBalance) {
+        throw Object.assign(
+          new Error(`Requested payout exceeds available balance (${availableBalance})`),
+          { statusCode: 400 },
+        );
+      }
+      const created = await tx.payoutRequest.create({
+        data: {
+          vendorType,
+          vendorId: vendor.id,
+          requesterUserId: req.user.id,
+          amount,
+          currency: String(req.body?.currency || vendor.currency || 'JOD').toUpperCase(),
+          reason: String(req.body?.reason || '').trim() || null,
+          idempotencyKey,
+        },
+      });
+      await appendFinancialTransaction({
+        prisma: tx,
+        payoutRequestId: created.id,
+        transactionType: 'payout',
+        status: created.status,
         amount,
-        currency: String(req.body?.currency || vendor.currency || 'JOD').toUpperCase(),
-        reason: String(req.body?.reason || '').trim() || null,
-      },
-    });
-
-    await appendFinancialTransaction({
-      prisma,
-      payoutRequestId: payout.id,
-      transactionType: 'payout',
-      status: payout.status,
-      amount,
-      currency: payout.currency,
-      metadata: { vendorType, vendorId: vendor.id },
-    });
-
-    await appendVendorLedgerEntry({
-      prisma,
-      vendorType,
-      vendorId: vendor.id,
-      payoutRequestId: payout.id,
-      entryType: 'payout_requested',
-      amount: -Math.abs(amount),
-      currency: payout.currency,
-      description: 'Payout requested by vendor',
-      metadata: {
-        requesterUserId: req.user.id,
-      },
-    });
-
-    await logAuditEvent({
-      prisma,
-      req,
-      action: 'finance.payout.requested',
-      entityType: 'payout_request',
-      entityId: payout.id,
-      metadata: { amount, vendorType, vendorId: vendor.id },
+        currency: created.currency,
+        sideEffectKey: `payout-request:${created.id}`,
+        metadata: { vendorType, vendorId: vendor.id },
+      });
+      await appendVendorLedgerEntry({
+        prisma: tx,
+        vendorType,
+        vendorId: vendor.id,
+        payoutRequestId: created.id,
+        entryType: 'payout_requested',
+        amount: -Math.abs(amount),
+        currency: created.currency,
+        description: 'Payout requested by vendor',
+        metadata: { requesterUserId: req.user.id },
+      });
+      await logAuditEvent({
+        prisma: tx,
+        req,
+        action: 'finance.payout.requested',
+        entityType: 'payout_request',
+        entityId: created.id,
+        metadata: { amount, vendorType, vendorId: vendor.id },
+      });
+      return created;
     });
 
     return res.status(201).json({ status: 'success', data: { payout } });
   } catch (error) {
     console.error('Create payout request error:', error);
-    return res.status(500).json({ status: 'error', message: 'Unable to request payout' });
+    return res.status(error.statusCode || 500).json({
+      status: error.statusCode ? 'fail' : 'error',
+      message: error.statusCode ? error.message : 'Unable to request payout',
+    });
   }
 });
 
 router.get('/payouts', authenticateToken, async (req, res) => {
   try {
     const where = {};
+    const { page, limit, skip } = paginationFrom(req.query);
+    if (req.query.status) where.status = String(req.query.status);
     if (!isAdmin(req)) {
       if (!isVendorOwnerRole(req.user.role)) {
         return res.status(403).json({ status: 'fail', message: 'Only admins and vendors can view payouts' });
       }
       const vendorType = req.user.role === 'bakery_owner' ? 'bakery' : 'restaurant';
       const vendor = vendorType === 'bakery'
-        ? await prisma.bakery.findFirst({ where: { ownerId: req.user.id, deletedAt: null } })
-        : await prisma.restaurant.findFirst({ where: { ownerId: req.user.id, deletedAt: null } });
+        ? await prisma.bakery.findFirst({ where: { ownerId: req.user.id, deletedAt: null, ...(selectedVendorIdFrom(req) ? { id: selectedVendorIdFrom(req) } : {}) } })
+        : await prisma.restaurant.findFirst({ where: { ownerId: req.user.id, deletedAt: null, ...(selectedVendorIdFrom(req) ? { id: selectedVendorIdFrom(req) } : {}) } });
       if (!vendor) return res.status(200).json({ status: 'success', data: { payouts: [] } });
       where.vendorType = vendorType;
       where.vendorId = vendor.id;
     }
 
-    const payouts = await prisma.payoutRequest.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-    });
+    const [payouts, total] = await Promise.all([
+      prisma.payoutRequest.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.payoutRequest.count({ where }),
+    ]);
 
-    return res.status(200).json({ status: 'success', data: { payouts } });
+    return res.status(200).json({ status: 'success', data: {
+      payouts,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    } });
   } catch (error) {
     console.error('List payouts error:', error);
     return res.status(500).json({ status: 'error', message: 'Unable to list payouts' });
@@ -830,61 +903,83 @@ router.get('/payouts', authenticateToken, async (req, res) => {
 const updatePayoutStatus = (targetStatus) =>
   async (req, res) => {
     try {
-      const payout = await prisma.payoutRequest.findUnique({ where: { id: req.params.payoutId } });
-      if (!payout) return res.status(404).json({ status: 'fail', message: 'Payout request not found' });
+      const updated = await prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(
+          'SELECT pg_advisory_xact_lock($1)',
+          advisoryLockId(`payout-status:${req.params.payoutId}`),
+        );
+        const payout = await tx.payoutRequest.findUnique({ where: { id: req.params.payoutId } });
+        if (!payout) throw Object.assign(new Error('Payout request not found'), { statusCode: 404 });
+        if (payout.status === targetStatus) return payout;
 
-      const data = {
-        status: targetStatus,
-        reviewedByUserId: req.user.id,
-        reviewedAt: new Date(),
-      };
-      if (targetStatus === 'paid') {
-        data.paidAt = new Date();
-        data.transactionRef = String(req.body?.transactionRef || '').trim() || payout.transactionRef;
-      }
-      if (targetStatus === 'rejected') {
-        data.reason = String(req.body?.reason || payout.reason || 'Rejected by admin').trim();
-      }
-
-      const updated = await prisma.payoutRequest.update({
-        where: { id: payout.id },
-        data,
+        const allowedPrevious = targetStatus === 'paid'
+          ? ['requested', 'approved']
+          : targetStatus === 'approved'
+            ? ['requested']
+            : ['requested', 'approved'];
+        if (!allowedPrevious.includes(payout.status)) {
+          throw Object.assign(
+            new Error(`Cannot transition payout from ${payout.status} to ${targetStatus}`),
+            { statusCode: 409 },
+          );
+        }
+        const data = {
+          status: targetStatus,
+          reviewedByUserId: req.user.id,
+          reviewedAt: new Date(),
+        };
+        if (targetStatus === 'paid') {
+          data.paidAt = new Date();
+          data.transactionRef = String(req.body?.transactionRef || '').trim() || payout.transactionRef;
+        }
+        if (targetStatus === 'rejected') {
+          data.reason = String(req.body?.reason || payout.reason || 'Rejected by admin').trim();
+        }
+        const changed = await tx.payoutRequest.updateMany({
+          where: { id: payout.id, status: { in: allowedPrevious } },
+          data,
+        });
+        if (changed.count !== 1) {
+          throw Object.assign(new Error('Payout status changed concurrently'), { statusCode: 409 });
+        }
+        await appendFinancialTransaction({
+          prisma: tx,
+          payoutRequestId: payout.id,
+          transactionType: 'payout',
+          status: targetStatus,
+          amount: payout.amount,
+          currency: payout.currency,
+          sideEffectKey: `payout-status:${payout.id}:${targetStatus}`,
+          metadata: { reviewedBy: req.user.id },
+        });
+        await appendVendorLedgerEntry({
+          prisma: tx,
+          vendorType: payout.vendorType,
+          vendorId: payout.vendorId,
+          payoutRequestId: payout.id,
+          entryType: `payout_${targetStatus}`,
+          sideEffectKey: `payout-status:${payout.id}:${targetStatus}`,
+          amount: targetStatus === 'rejected' ? Math.abs(Number(payout.amount)) : -Math.abs(Number(payout.amount)),
+          currency: payout.currency,
+          description: `Payout ${targetStatus}`,
+          metadata: { reviewedBy: req.user.id },
+        });
+        await logAuditEvent({
+          prisma: tx,
+          req,
+          action: `finance.payout.${targetStatus}`,
+          entityType: 'payout_request',
+          entityId: payout.id,
+        });
+        return tx.payoutRequest.findUnique({ where: { id: payout.id } });
       });
-
-      await appendFinancialTransaction({
-        prisma,
-        payoutRequestId: payout.id,
-        transactionType: 'payout',
-        status: targetStatus,
-        amount: payout.amount,
-        currency: payout.currency,
-        metadata: { reviewedBy: req.user.id },
-      });
-
-      await appendVendorLedgerEntry({
-        prisma,
-        vendorType: payout.vendorType,
-        vendorId: payout.vendorId,
-        payoutRequestId: payout.id,
-        entryType: `payout_${targetStatus}`,
-        amount: targetStatus === 'rejected' ? Math.abs(Number(payout.amount)) : -Math.abs(Number(payout.amount)),
-        currency: payout.currency,
-        description: `Payout ${targetStatus}`,
-        metadata: { reviewedBy: req.user.id },
-      });
-
-      await logAuditEvent({
-        prisma,
-        req,
-        action: `finance.payout.${targetStatus}`,
-        entityType: 'payout_request',
-        entityId: payout.id,
-      });
-
       return res.status(200).json({ status: 'success', data: { payout: updated } });
     } catch (error) {
       console.error(`Update payout status (${targetStatus}) error:`, error);
-      return res.status(500).json({ status: 'error', message: 'Unable to update payout status' });
+      return res.status(error.statusCode || 500).json({
+        status: error.statusCode ? 'fail' : 'error',
+        message: error.statusCode ? error.message : 'Unable to update payout status',
+      });
     }
   };
 
@@ -953,8 +1048,8 @@ router.get('/payout-accounts', authenticateToken, async (req, res) => {
       }
       const vendorType = req.user.role === 'bakery_owner' ? 'bakery' : 'restaurant';
       const vendor = vendorType === 'bakery'
-        ? await prisma.bakery.findFirst({ where: { ownerId: req.user.id, deletedAt: null }, select: { id: true } })
-        : await prisma.restaurant.findFirst({ where: { ownerId: req.user.id, deletedAt: null }, select: { id: true } });
+        ? await prisma.bakery.findFirst({ where: { ownerId: req.user.id, deletedAt: null, ...(selectedVendorIdFrom(req) ? { id: selectedVendorIdFrom(req) } : {}) }, select: { id: true } })
+        : await prisma.restaurant.findFirst({ where: { ownerId: req.user.id, deletedAt: null, ...(selectedVendorIdFrom(req) ? { id: selectedVendorIdFrom(req) } : {}) }, select: { id: true } });
       where.vendorType = vendorType;
       where.vendorId = vendor?.id || '__none__';
     }
@@ -982,8 +1077,8 @@ router.post('/payout-accounts', authenticateToken, async (req, res) => {
       }
       vendorType = req.user.role === 'bakery_owner' ? 'bakery' : 'restaurant';
       const vendor = vendorType === 'bakery'
-        ? await prisma.bakery.findFirst({ where: { ownerId: req.user.id, deletedAt: null }, select: { id: true } })
-        : await prisma.restaurant.findFirst({ where: { ownerId: req.user.id, deletedAt: null }, select: { id: true } });
+        ? await prisma.bakery.findFirst({ where: { ownerId: req.user.id, deletedAt: null, ...(selectedVendorIdFrom(req) ? { id: selectedVendorIdFrom(req) } : {}) }, select: { id: true } })
+        : await prisma.restaurant.findFirst({ where: { ownerId: req.user.id, deletedAt: null, ...(selectedVendorIdFrom(req) ? { id: selectedVendorIdFrom(req) } : {}) }, select: { id: true } });
       vendorId = vendor?.id || '';
     }
 
@@ -1017,7 +1112,7 @@ router.post('/payout-accounts', authenticateToken, async (req, res) => {
           provider: String(req.body?.provider || '').trim() || null,
           externalAccountId: String(req.body?.externalAccountId || '').trim() || null,
           isPrimary,
-          isVerified: Boolean(req.body?.isVerified),
+          isVerified: false,
           metadata: req.body?.metadata || null,
         },
       });
@@ -1038,6 +1133,55 @@ router.post('/payout-accounts', authenticateToken, async (req, res) => {
     return res.status(500).json({ status: 'error', message: 'Unable to create payout account' });
   }
 });
+
+router.post(
+  '/payout-accounts/:accountId/verification',
+  authenticateToken,
+  authorizeRole(['admin']),
+  async (req, res) => {
+    try {
+      const isVerified = req.body?.isVerified;
+      if (typeof isVerified !== 'boolean') {
+        return res.status(400).json({ status: 'fail', message: 'isVerified must be boolean' });
+      }
+      const account = await prisma.$transaction(async (tx) => {
+        const existing = await tx.payoutAccount.findUnique({ where: { id: req.params.accountId } });
+        if (!existing) throw Object.assign(new Error('Payout account not found'), { statusCode: 404 });
+        const updated = await tx.payoutAccount.update({
+          where: { id: existing.id },
+          data: {
+            isVerified,
+            metadata: {
+              ...(existing.metadata && typeof existing.metadata === 'object' ? existing.metadata : {}),
+              verification: {
+                actorUserId: req.user.id,
+                status: isVerified ? 'verified' : 'rejected',
+                at: new Date().toISOString(),
+              },
+            },
+          },
+        });
+        await logAuditEvent({
+          prisma: tx,
+          req,
+          action: isVerified
+            ? 'finance.payout_account.verified'
+            : 'finance.payout_account.rejected',
+          entityType: 'payout_account',
+          entityId: existing.id,
+          metadata: { vendorType: existing.vendorType, vendorId: existing.vendorId },
+        });
+        return updated;
+      });
+      return res.status(200).json({ status: 'success', data: { account } });
+    } catch (error) {
+      return res.status(error.statusCode || 500).json({
+        status: error.statusCode ? 'fail' : 'error',
+        message: error.statusCode ? error.message : 'Unable to update payout verification',
+      });
+    }
+  },
+);
 
 router.get('/vendor-ledger', authenticateToken, async (req, res) => {
   try {

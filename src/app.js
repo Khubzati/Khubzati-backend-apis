@@ -120,6 +120,7 @@ const paymentRoutes = require('./routes/payments');
 const financeRoutes = require('./routes/finance');
 const deliveryRoutes = require('./routes/delivery');
 const contractRoutes = require('./routes/contracts');
+const cartRoutes = require('./routes/cart');
 
 // Middleware
 app.use(helmet()); // Security headers
@@ -136,7 +137,9 @@ app.use(
         return callback(null, true);
       }
 
-      if (!isProduction && devCorsOriginPattern.test(normalizedOrigin)) {
+      // Always allow loopback origins to support local admin/front-end development
+      // against remote environments (e.g. Railway production APIs).
+      if (devCorsOriginPattern.test(normalizedOrigin)) {
         return callback(null, true);
       }
 
@@ -176,6 +179,8 @@ app.use('/v1/products', productRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/v1/orders', orderRoutes);
 app.use('/api/customer/orders', orderRoutes);
+app.use('/api/customer/cart', cartRoutes);
+app.use('/v1/customer/cart', cartRoutes);
 app.use('/v1/customer/orders', orderRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/v1/reviews', reviewRoutes);

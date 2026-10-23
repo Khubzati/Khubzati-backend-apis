@@ -95,7 +95,7 @@ if (user != null) {
 ### Test Backend Endpoint:
 ```bash
 # Get a Firebase ID token from your Flutter app first
-curl -X POST http://localhost:3000/v1/auth/login-with-firebase \
+curl -X POST https://api.khubzati.com/v1/auth/login-with-firebase \
   -H "Content-Type: application/json" \
   -d '{"idToken": "YOUR_FIREBASE_ID_TOKEN"}'
 ```

@@ -15,6 +15,7 @@ const redis =
   redisUrl && typeof redisUrl === 'string' && redisUrl.length > 0
     ? new Redis(redisUrl)
     : null;
+let hasLoggedRedisLimiterFallback = false;
 
 const router = express.Router();
 
@@ -54,6 +55,183 @@ const otpRouteLimiter = createRateLimiter({
   message: 'Too many OTP requests. Please try again later.',
 });
 
+const isPrismaMissingTableError = (error, tableName) =>
+  error?.code === 'P2021' &&
+  typeof error?.meta?.table === 'string' &&
+  error.meta.table.includes(tableName);
+
+const isPrismaMissingColumnError = (error, tableName, columnName) =>
+  error?.code === 'P2022' &&
+  typeof error?.meta?.column === 'string' &&
+  error.meta.column.includes(`${tableName}.${columnName}`);
+
+const isAuthUserColumnError = (error) =>
+  isPrismaMissingColumnError(error, 'users', 'otp') ||
+  isPrismaMissingColumnError(error, 'users', 'otp_expiry');
+
+const isAuthInfraTableError = (error) =>
+  isPrismaMissingTableError(error, 'audit_logs') ||
+  isPrismaMissingTableError(error, 'user_security_events') ||
+  isPrismaMissingTableError(error, 'device_tokens');
+
+const isAuthRuntimeSchemaError = (error) =>
+  isAuthInfraTableError(error) || isAuthUserColumnError(error);
+
+let authInfraEnsured = false;
+let authInfraEnsurePromise = null;
+let authUserColumnsEnsured = false;
+let authUserColumnsEnsurePromise = null;
+
+const ensureAuthInfraTables = async ({ force = false } = {}) => {
+  if (authInfraEnsured && !force) return true;
+  if (authInfraEnsurePromise && !force) return authInfraEnsurePromise;
+
+  const ensureTask = (async () => {
+    try {
+      // Keep this narrowly scoped to auth-related operational tables
+      // so OTP/login can proceed even when a deployment missed a migration.
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "audit_logs" (
+          "id" TEXT NOT NULL,
+          "actor_user_id" TEXT,
+          "actor_role" TEXT,
+          "action" TEXT NOT NULL,
+          "entity_type" TEXT NOT NULL,
+          "entity_id" TEXT,
+          "request_id" TEXT,
+          "metadata" JSONB,
+          "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT "audit_logs_pkey" PRIMARY KEY ("id")
+        )
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS "audit_logs_actor_user_id_created_at_idx"
+        ON "audit_logs"("actor_user_id", "created_at")
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS "audit_logs_entity_type_entity_id_created_at_idx"
+        ON "audit_logs"("entity_type", "entity_id", "created_at")
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS "audit_logs_action_created_at_idx"
+        ON "audit_logs"("action", "created_at")
+      `);
+
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "user_security_events" (
+          "id" TEXT NOT NULL,
+          "user_id" TEXT,
+          "event_type" TEXT NOT NULL,
+          "status" TEXT NOT NULL DEFAULT 'recorded',
+          "identifier" TEXT,
+          "ip_address" TEXT,
+          "user_agent" TEXT,
+          "request_id" TEXT,
+          "metadata" JSONB,
+          "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT "user_security_events_pkey" PRIMARY KEY ("id")
+        )
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS "user_security_events_user_id_created_at_idx"
+        ON "user_security_events"("user_id", "created_at")
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS "user_security_events_event_type_created_at_idx"
+        ON "user_security_events"("event_type", "created_at")
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS "user_security_events_identifier_created_at_idx"
+        ON "user_security_events"("identifier", "created_at")
+      `);
+
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "device_tokens" (
+          "id" TEXT NOT NULL,
+          "user_id" TEXT NOT NULL,
+          "token" TEXT NOT NULL,
+          "platform" TEXT,
+          "last_used" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updated_at" TIMESTAMP(3),
+          CONSTRAINT "device_tokens_pkey" PRIMARY KEY ("id"),
+          CONSTRAINT "device_tokens_token_key" UNIQUE ("token")
+        )
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE INDEX IF NOT EXISTS "device_tokens_user_id_idx"
+        ON "device_tokens"("user_id")
+      `);
+
+      authInfraEnsured = true;
+      return true;
+    } catch (error) {
+      console.error('Failed to ensure auth infra tables:', error?.message || error);
+      return false;
+    } finally {
+      if (authInfraEnsurePromise === ensureTask) {
+        authInfraEnsurePromise = null;
+      }
+    }
+  })();
+
+  authInfraEnsurePromise = ensureTask;
+  return ensureTask;
+};
+
+const ensureAuthUserColumns = async ({ force = false } = {}) => {
+  if (authUserColumnsEnsured && !force) return true;
+  if (authUserColumnsEnsurePromise && !force) return authUserColumnsEnsurePromise;
+
+  const ensureTask = (async () => {
+    try {
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "users"
+        ADD COLUMN IF NOT EXISTS "otp" TEXT
+      `);
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "users"
+        ADD COLUMN IF NOT EXISTS "otp_expiry" TIMESTAMPTZ(3)
+      `);
+      authUserColumnsEnsured = true;
+      return true;
+    } catch (error) {
+      console.error('Failed to ensure auth user columns:', error?.message || error);
+      return false;
+    } finally {
+      if (authUserColumnsEnsurePromise === ensureTask) {
+        authUserColumnsEnsurePromise = null;
+      }
+    }
+  })();
+
+  authUserColumnsEnsurePromise = ensureTask;
+  return ensureTask;
+};
+
+const updateUserWithInfraRecovery = async ({ where, data }) => {
+  try {
+    return await prisma.user.update({ where, data });
+  } catch (error) {
+    if (!isAuthInfraTableError(error) && !isAuthUserColumnError(error)) {
+      throw error;
+    }
+
+    console.warn(
+      'Auth user update failed due to missing schema element, attempting self-heal and retry:',
+      error?.meta?.table || error?.meta?.column || error?.message || error
+    );
+    const [infraHealed, userColumnsHealed] = await Promise.all([
+      ensureAuthInfraTables({ force: true }),
+      ensureAuthUserColumns({ force: true }),
+    ]);
+    if (!infraHealed && !userColumnsHealed) {
+      throw error;
+    }
+    return prisma.user.update({ where, data });
+  }
+};
+
 const sanitizeUser = (user) => {
   const { password, otp, otpExpiry, ...userData } = user;
   return userData;
@@ -70,6 +248,30 @@ const resolveDeviceToken = (body = {}) =>
   body.pushToken ||
   body.push_token ||
   null;
+
+// Best-effort self-heal on startup and before auth requests so
+// OTP/login routes can keep working during partially-applied deploys.
+const ensureAuthRuntimeSchema = async ({ force = false } = {}) => {
+  const [infraReady, userColumnsReady] = await Promise.all([
+    ensureAuthInfraTables({ force }),
+    ensureAuthUserColumns({ force }),
+  ]);
+  return infraReady || userColumnsReady;
+};
+
+ensureAuthRuntimeSchema().catch(() => {});
+
+router.use(async (_req, _res, next) => {
+  try {
+    await ensureAuthRuntimeSchema();
+  } catch (error) {
+    console.warn(
+      'Auth runtime schema preflight failed, continuing request:',
+      error?.message || error
+    );
+  }
+  next();
+});
 
 const hasDeviceTokenModel = () =>
   !!prisma?.deviceToken &&
@@ -197,12 +399,22 @@ const canRequestOtp = async (key) => {
   if (!key) return false;
 
   if (redis) {
-    const redisKey = `otp:limiter:${key}`;
-    const count = await redis.incr(redisKey);
-    if (count === 1) {
-      await redis.pexpire(redisKey, WINDOW_MS);
+    try {
+      const redisKey = `otp:limiter:${key}`;
+      const count = await redis.incr(redisKey);
+      if (count === 1) {
+        await redis.pexpire(redisKey, WINDOW_MS);
+      }
+      return count <= MAX_ATTEMPTS;
+    } catch (error) {
+      if (!hasLoggedRedisLimiterFallback) {
+        hasLoggedRedisLimiterFallback = true;
+        console.warn(
+          '⚠️  Redis OTP limiter unavailable; falling back to in-memory limiter:',
+          error?.message || error
+        );
+      }
     }
-    return count <= MAX_ATTEMPTS;
   }
 
   const now = Date.now();
@@ -222,9 +434,13 @@ const findUserByIdentifiers = async (
   emailToCheck,
   usernameToCheck,
   phoneToCheck,
-  preferredRole = null
+  preferredRole = null,
+  _didRetryAfterSchemaHeal = false
 ) => {
   try {
+    const isProductionEnvironment =
+      String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+
     const isPhoneColumnMissingError = (error) =>
       error?.code === 'P2022' &&
       typeof error?.meta?.column === 'string' &&
@@ -265,7 +481,9 @@ const findUserByIdentifiers = async (
       }
 
       if (role) {
-        conditions.push(`"role" = $${paramIndex}::"UserRole"`);
+        // Avoid hard-casting to a Prisma enum type name here because some
+        // production databases may use a different enum/text representation.
+        conditions.push(`"role" = $${paramIndex}`);
         params.push(role);
       }
 
@@ -404,7 +622,7 @@ const findUserByIdentifiers = async (
             allowRoleFallback: !normalizedPreferredRole,
             includeDeleted: false,
           });
-          if (!user) {
+          if (!user && !isProductionEnvironment) {
             user = await findUserByPhoneWithRolePriority(phoneToCheck, {
               allowRoleFallback: !normalizedPreferredRole,
               includeDeleted: true,
@@ -417,7 +635,7 @@ const findUserByIdentifiers = async (
           allowRoleFallback: !normalizedPreferredRole,
           includeDeleted: false,
         });
-        if (!user) {
+        if (!user && !isProductionEnvironment) {
           user = await findUserByPhoneWithRolePriority(phoneToCheck, {
             allowRoleFallback: !normalizedPreferredRole,
             includeDeleted: true,
@@ -496,7 +714,30 @@ const findUserByIdentifiers = async (
           const uniqueVariations = [...new Set(phoneVariations)];
           console.log(`[DEBUG] Trying ${uniqueVariations.length} phone variations:`, uniqueVariations.slice(0, 5));
 
-          if (normalizedPreferredRole) {
+          if (isProductionEnvironment && !user) {
+            // Production fast path: use batched IN queries to avoid slow
+            // sequential lookups when credentials are invalid.
+            const batchedVariations = uniqueVariations.slice(0, 8);
+            if (normalizedPreferredRole) {
+              user = await prisma.user.findFirst({
+                where: {
+                  deletedAt: null,
+                  role: normalizedPreferredRole,
+                  phoneNumber: { in: batchedVariations },
+                },
+              });
+            }
+            if (!user) {
+              user = await prisma.user.findFirst({
+                where: {
+                  deletedAt: null,
+                  phoneNumber: { in: batchedVariations },
+                },
+              });
+            }
+          }
+
+          if (!user && normalizedPreferredRole && !isProductionEnvironment) {
             // Pass 1: requested role + active accounts only.
             for (const variation of uniqueVariations) {
               if (variation === phoneToCheck && user) continue; // Already tried
@@ -515,7 +756,7 @@ const findUserByIdentifiers = async (
             }
           }
 
-          if (!user) {
+          if (!user && !isProductionEnvironment) {
             // Pass 2: any role, active accounts only.
             for (const variation of uniqueVariations) {
               if (variation === phoneToCheck && user) continue; // Already tried
@@ -532,7 +773,7 @@ const findUserByIdentifiers = async (
             }
           }
 
-          if (!user && normalizedPreferredRole) {
+          if (!user && normalizedPreferredRole && !isProductionEnvironment) {
             // Pass 3: requested role, including deleted accounts.
             for (const variation of uniqueVariations) {
               if (variation === phoneToCheck && user) continue; // Already tried
@@ -551,7 +792,7 @@ const findUserByIdentifiers = async (
             }
           }
 
-          if (!user) {
+          if (!user && !isProductionEnvironment) {
             // Pass 4: any role, including deleted accounts.
             for (const variation of uniqueVariations) {
               if (variation === phoneToCheck && user) continue; // Already tried
@@ -570,8 +811,11 @@ const findUserByIdentifiers = async (
             }
           }
 
-          // If still not found, try normalized search on ALL users
-          if (!user && normalizedInput.length >= 7) {
+          // If still not found, try normalized search on ALL users.
+          // This fallback is intentionally disabled in production because
+          // it can become very slow on large datasets.
+          const allowFullUserScan = !isProductionEnvironment;
+          if (!user && normalizedInput.length >= 7 && allowFullUserScan) {
             console.log(`[DEBUG] Trying normalized search for: ${normalizedInput}`);
             try {
           // Get ALL users with phone numbers (no limit for comprehensive search)
@@ -698,6 +942,18 @@ const findUserByIdentifiers = async (
 
     return user;
   } catch (error) {
+    if (isAuthUserColumnError(error) && !_didRetryAfterSchemaHeal) {
+      const healed = await ensureAuthUserColumns({ force: true });
+      if (healed) {
+        return findUserByIdentifiers(
+          emailToCheck,
+          usernameToCheck,
+          phoneToCheck,
+          preferredRole,
+          true
+        );
+      }
+    }
     console.error('Error in findUserByIdentifiers:', error);
     throw error;
   }
@@ -797,10 +1053,19 @@ const countRecentFailedOtpAttempts = async ({ userId = null, identifier = null }
     return 0;
   }
 
-  return prisma.userSecurityEvent.count({ where });
+  try {
+    return await prisma.userSecurityEvent.count({ where });
+  } catch (error) {
+    // Security-event telemetry must not block OTP verification.
+    console.warn(
+      'Failed to count recent failed OTP attempts, continuing without cap check:',
+      error?.message || error
+    );
+    return 0;
+  }
 };
 
-const resolveVendorStatusForUser = async (user) => {
+const resolveVendorStatusForUser = async (user, selectedVendorId = null) => {
   if (!user || (user.role !== 'bakery_owner' && user.role !== 'restaurant_owner')) {
     return null;
   }
@@ -815,93 +1080,85 @@ const resolveVendorStatusForUser = async (user) => {
   };
 
   const deriveVendorStatusFromRecords = (records, vendorType) => {
+    const vendorEntities = (records || []).map((record) => {
+      const normalizedStatus = String(record.status || '').trim().toLowerCase();
+      return {
+        vendorType,
+        vendorId: record.id,
+        name: record.name || null,
+        status: normalizedStatus,
+        rejectionReason: record.rejectionReason || null,
+        rejectedAt: record.rejectedAt || null,
+      };
+    });
     if (!Array.isArray(records) || records.length === 0) {
       return {
         hasVendor: false,
         vendorApproved: false,
         vendorPending: false,
         vendorRejected: false,
+        vendorSuspended: false,
+        vendorInactive: false,
+        accountStatus: null,
         vendorType,
         vendorId: null,
         rejectionReason: null,
         rejectedAt: null,
+        currentVendorId: null,
+        vendorEntities,
       };
     }
 
     const normalizeStatus = (record) =>
       (record?.status || '').toString().trim().toLowerCase();
-    const statuses = records.map(normalizeStatus);
-    const hasApproved = statuses.some(
-      (status) => status === 'approved' || status === 'active'
-    );
-    const hasPending = statuses.some(
-      (status) => status === 'pending_approval' || status === 'pending'
-    );
-    const hasRejected = statuses.some((status) => status === 'rejected');
-    const pickLatestByStatus = (statusMatcher) => records.find((record) => statusMatcher(normalizeStatus(record)));
-
-    if (hasApproved) {
-      const approvedRecord = pickLatestByStatus((status) => status === 'approved' || status === 'active');
-      return {
-        hasVendor: true,
-        vendorApproved: true,
-        vendorPending: false,
-        vendorRejected: false,
-        vendorType,
-        vendorId: approvedRecord?.id || null,
-        rejectionReason: null,
-        rejectedAt: null,
-      };
-    }
-
-    if (hasPending) {
-      const pendingRecord = pickLatestByStatus(
-        (status) => status === 'pending_approval' || status === 'pending'
-      );
-      return {
-        hasVendor: true,
-        vendorApproved: false,
-        vendorPending: true,
-        vendorRejected: false,
-        vendorType,
-        vendorId: pendingRecord?.id || null,
-        rejectionReason: null,
-        rejectedAt: null,
-      };
-    }
-
-    if (hasRejected) {
-      const rejectedRecord = pickLatestByStatus((status) => status === 'rejected');
-      return {
-        hasVendor: true,
-        vendorApproved: false,
-        vendorPending: false,
-        vendorRejected: true,
-        vendorType,
-        vendorId: rejectedRecord?.id || null,
-        rejectionReason: rejectedRecord?.rejectionReason || null,
-        rejectedAt: rejectedRecord?.rejectedAt || null,
-      };
-    }
-
-    // Inactive-only records.
+    const selectedRecord =
+      records.find((record) => record.id === selectedVendorId) || records[0];
+    const rawStatus = normalizeStatus(selectedRecord);
+    const accountStatus =
+      rawStatus === 'active' ? 'approved' :
+      rawStatus === 'pending' ? 'pending_approval' :
+      rawStatus;
     return {
       hasVendor: true,
-      vendorApproved: false,
-      vendorPending: false,
-      vendorRejected: false,
+      vendorApproved: accountStatus === 'approved',
+      vendorPending: accountStatus === 'pending_approval',
+      vendorRejected: accountStatus === 'rejected',
+      vendorSuspended: accountStatus === 'suspended',
+      vendorInactive: accountStatus === 'inactive',
+      accountStatus: accountStatus || null,
       vendorType,
-      vendorId: records?.[0]?.id || null,
-      rejectionReason: null,
-      rejectedAt: null,
+      vendorId: selectedRecord.id,
+      currentVendorId: selectedRecord.id,
+      rejectionReason:
+        accountStatus === 'rejected' ? selectedRecord.rejectionReason || null : null,
+      rejectedAt:
+        accountStatus === 'rejected' ? selectedRecord.rejectedAt || null : null,
+      vendorEntities,
     };
   };
 
-  if (user.role === 'bakery_owner') {
-    const bakeries = await prisma.bakery.findMany({
+  try {
+    if (user.role === 'bakery_owner') {
+      const bakeries = await prisma.bakery.findMany({
+        where: vendorOwnershipWhere,
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          rejectionReason: true,
+          rejectedAt: true,
+        },
+        orderBy: { updatedAt: 'desc' },
+      });
+
+      return deriveVendorStatusFromRecords(bakeries, 'bakery');
+    }
+
+    const restaurants = await prisma.restaurant.findMany({
       where: vendorOwnershipWhere,
       select: {
         id: true,
+        name: true,
         status: true,
         rejectionReason: true,
         rejectedAt: true,
@@ -909,21 +1166,29 @@ const resolveVendorStatusForUser = async (user) => {
       orderBy: { updatedAt: 'desc' },
     });
 
-    return deriveVendorStatusFromRecords(bakeries, 'bakery');
+    return deriveVendorStatusFromRecords(restaurants, 'restaurant');
+  } catch (error) {
+    // Vendor status lookup is helpful metadata; it should never break auth.
+    console.warn(
+      `Failed to resolve vendor status for user ${user.id}, returning safe fallback:`,
+      error?.message || error
+    );
+    return {
+      hasVendor: false,
+      vendorApproved: false,
+      vendorPending: false,
+      vendorRejected: false,
+      vendorSuspended: false,
+      vendorInactive: false,
+      accountStatus: null,
+      vendorType: user.role === 'bakery_owner' ? 'bakery' : 'restaurant',
+      vendorId: null,
+      rejectionReason: null,
+      rejectedAt: null,
+      currentVendorId: null,
+      vendorEntities: [],
+    };
   }
-
-  const restaurants = await prisma.restaurant.findMany({
-    where: vendorOwnershipWhere,
-    select: {
-      id: true,
-      status: true,
-      rejectionReason: true,
-      rejectedAt: true,
-    },
-    orderBy: { updatedAt: 'desc' },
-  });
-
-  return deriveVendorStatusFromRecords(restaurants, 'restaurant');
 };
 
 const ensureRestaurantProfileForOwner = async (user, registrationSeed = {}) => {
@@ -1193,7 +1458,7 @@ router.post('/register', async (req, res) => {
       const generatedOtp = generateOtpCode();
       const otpExpiry = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
-      await prisma.user.update({
+      await updateUserWithInfraRecovery({
         where: { id: existingUser.id },
         data: {
           otp: generatedOtp,
@@ -1450,7 +1715,7 @@ router.post('/login', otpRouteLimiter, async (req, res) => {
       const generatedOtp = generateOtpCode();
       const otpExpiry = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
-      await prisma.user.update({
+      await updateUserWithInfraRecovery({
         where: { id: user.id },
         data: {
           otp: generatedOtp,
@@ -1539,13 +1804,6 @@ router.post('/login', otpRouteLimiter, async (req, res) => {
       });
     }
 
-    if (!user.otp || !user.otpExpiry) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'Invalid or expired OTP',
-      });
-    }
-
     // Password login path (if password provided)
     if (password) {
       const validPassword = await bcrypt.compare(password, user.password);
@@ -1553,6 +1811,12 @@ router.post('/login', otpRouteLimiter, async (req, res) => {
         return res.status(401).json({ status: 'fail', message: 'Invalid credentials' });
       }
     } else {
+      if (!user.otp || !user.otpExpiry) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Invalid or expired OTP',
+        });
+      }
       const now = new Date();
       if (user.otp !== otp || user.otpExpiry < now) {
         return res.status(400).json({
@@ -1562,7 +1826,7 @@ router.post('/login', otpRouteLimiter, async (req, res) => {
       }
     }
 
-    const updatedUser = await prisma.user.update({
+    const updatedUser = await updateUserWithInfraRecovery({
       where: { id: user.id },
       data: {
         otp: null,
@@ -1631,6 +1895,14 @@ router.post('/login', otpRouteLimiter, async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error);
+    if (isAuthRuntimeSchemaError(error)) {
+      return res.status(503).json({
+        status: 'fail',
+        message:
+          'Server setup is incomplete (missing auth schema elements). Please apply latest database migrations.',
+        code: 'AUTH_INFRA_MISSING_TABLES',
+      });
+    }
     return res.status(500).json({
       status: 'error',
       message: 'An error occurred during login',
@@ -1706,7 +1978,7 @@ router.post('/resend-otp', otpRouteLimiter, async (req, res) => {
     const otp = generateOtpCode();
     const otpExpiry = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
-    await prisma.user.update({
+    await updateUserWithInfraRecovery({
       where: { id: user.id },
       data: {
         otp,
@@ -1906,7 +2178,7 @@ router.post('/verify-otp', otpRouteLimiter, async (req, res) => {
       updateData.isVerified = true;
     }
 
-    const updatedUser = await prisma.user.update({
+    const updatedUser = await updateUserWithInfraRecovery({
       where: { id: user.id },
       data: updateData,
     });
@@ -1957,9 +2229,20 @@ router.post('/verify-otp', otpRouteLimiter, async (req, res) => {
     });
   } catch (error) {
     console.error('Verify OTP error:', error);
+    if (isAuthRuntimeSchemaError(error)) {
+      return res.status(503).json({
+        status: 'fail',
+        message:
+          'Server setup is incomplete (missing auth schema elements). Please apply latest database migrations.',
+        code: 'AUTH_INFRA_MISSING_TABLES',
+      });
+    }
     return res.status(500).json({
       status: 'error',
       message: 'An error occurred while verifying OTP',
+      ...(process.env.NODE_ENV !== 'production' && {
+        error: error?.message || String(error),
+      }),
     });
   }
 });
@@ -1984,11 +2267,25 @@ router.get('/approval-status', authenticateToken, async (req, res) => {
       });
     }
 
-    const vendorStatus = await resolveVendorStatusForUser(user);
+    const selectedVendorId = String(
+      req.query.vendorId || req.headers['x-vendor-id'] || '',
+    ).trim() || null;
+    const vendorStatus = await resolveVendorStatusForUser(user, selectedVendorId);
+    if (
+      selectedVendorId &&
+      !vendorStatus?.vendorEntities?.some(
+        (entity) => entity.vendorId === selectedVendorId,
+      )
+    ) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Selected vendor is not owned by this account',
+      });
+    }
     const requiresApproval = !!(
       vendorStatus &&
       vendorStatus.hasVendor &&
-      (vendorStatus.vendorPending || vendorStatus.vendorRejected)
+      !vendorStatus.vendorApproved
     );
 
     return res.status(200).json({
@@ -2041,7 +2338,7 @@ const handleRequestPasswordReset = async (req, res) => {
     const otpExpiry = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
     const verificationId = phoneToCheck || emailToCheck || usernameToCheck || user.phoneNumber || user.email;
 
-    await prisma.user.update({
+    await updateUserWithInfraRecovery({
       where: { id: user.id },
       data: {
         otp,
@@ -2134,7 +2431,7 @@ router.post('/reset-password', otpRouteLimiter, async (req, res) => {
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(String(newPassword), salt);
-    await prisma.user.update({
+    await updateUserWithInfraRecovery({
       where: { id: user.id },
       data: {
         password: hashedPassword,
@@ -2253,7 +2550,7 @@ router.post('/login-with-firebase', async (req, res) => {
     } else {
       // Update user if needed (e.g., mark as verified)
       if (!user.isVerified) {
-        user = await prisma.user.update({
+        user = await updateUserWithInfraRecovery({
           where: { id: user.id },
           data: { isVerified: true },
         });

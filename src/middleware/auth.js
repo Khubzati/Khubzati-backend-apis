@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const prisma = require('../lib/prisma');
 const isProduction = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
 
 const getJwtSecrets = () => {
@@ -56,8 +57,13 @@ const verifyTokenWithRotation = (token) => {
 };
 
 // Middleware to authenticate JWT token
-const authenticateToken = (req, res, next) => {
+const authenticateToken = async (req, res, next) => {
   try {
+    // Let CORS preflight requests pass before auth checks.
+    if (req.method === 'OPTIONS') {
+      return next();
+    }
+
     // Get token from Authorization header
     const authHeader = req.headers.authorization;
     const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN format
@@ -76,7 +82,35 @@ const authenticateToken = (req, res, next) => {
         message: 'Invalid token payload',
       });
     }
-    req.user = decoded;
+    const currentUser = await prisma.user.findUnique({
+      where: { id: decoded.id },
+      select: { id: true, role: true, deletedAt: true, isVerified: true },
+    });
+    if (!currentUser || currentUser.deletedAt) {
+      return res.status(401).json({ status: 'fail', message: 'Session revoked' });
+    }
+    if (currentUser.role !== decoded.role) {
+      return res.status(403).json({ status: 'fail', message: 'Session role is no longer valid' });
+    }
+    if (['admin', 'customer', 'driver'].includes(currentUser.role) && !currentUser.isVerified) {
+      return res.status(403).json({ status: 'fail', message: 'Account is inactive' });
+    }
+    if (currentUser.role === 'bakery_owner' || currentUser.role === 'restaurant_owner') {
+      const selectedVendorId = String(req.headers['x-vendor-id'] || '').trim();
+      const delegate = currentUser.role === 'bakery_owner' ? prisma.bakery : prisma.restaurant;
+      const vendor = await delegate.findFirst({
+        where: {
+          ownerId: currentUser.id,
+          deletedAt: null,
+          ...(selectedVendorId ? { id: selectedVendorId } : {}),
+        },
+        select: { status: true },
+      });
+      if (vendor?.status === 'suspended') {
+        return res.status(403).json({ status: 'fail', message: 'Vendor account is suspended' });
+      }
+    }
+    req.user = { ...decoded, role: currentUser.role };
     return next();
   } catch (error) {
     if (error?.name === 'TokenExpiredError') {
@@ -128,6 +162,10 @@ const authenticateTokenOptional = (req, _res, next) => {
 // Middleware to check user role
 const authorizeRole = (roles) => {
   return (req, res, next) => {
+    if (req.method === 'OPTIONS') {
+      return next();
+    }
+
     if (!req.user) {
       return res.status(401).json({
         status: 'fail',

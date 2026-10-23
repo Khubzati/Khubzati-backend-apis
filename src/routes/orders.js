@@ -16,6 +16,7 @@ const {
 } = require('../services/payments/payment-constants');
 const { PaymentService } = require('../services/payments/payment-service');
 const { RecurringOrderService } = require('../services/recurringOrderService');
+const { isRestaurantBuyerReceiptConfirmation } = require('../utils/order-status-authorization');
 
 const router = express.Router();
 const allowTestFallbacks = false;
@@ -54,6 +55,17 @@ const formatCurrency = (value, currencyCode) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(asNumber(value));
+
+// Flat delivery fee for the controlled launch (no zone/distance pricing yet).
+// DEFAULT_DELIVERY_FEE is an operator-configured placeholder — confirm the
+// real business rate before general availability launch.
+const DEFAULT_DELIVERY_FEE_FALLBACK = 1.0;
+const getFlatDeliveryFee = () => {
+  const parsed = Number.parseFloat(process.env.DEFAULT_DELIVERY_FEE);
+  return Number.isFinite(parsed) && parsed >= 0
+    ? parsed
+    : DEFAULT_DELIVERY_FEE_FALLBACK;
+};
 
 const formatDateTime = (value) => {
   try {
@@ -398,6 +410,9 @@ const createOrderHandler = async (req, res) => {
       productId: String(item?.productId || '').trim(),
       quantity: Number.parseInt(item?.quantity, 10),
       specialInstructions: item?.specialInstructions ? String(item.specialInstructions) : null,
+      selectedModifierOptionIds: Array.isArray(item?.selectedModifierOptionIds)
+        ? [...new Set(item.selectedModifierOptionIds.map((id) => String(id || '').trim()).filter(Boolean))]
+        : [],
     }));
 
     const invalidItem = sanitizedItems.find(
@@ -417,6 +432,20 @@ const createOrderHandler = async (req, res) => {
         id: { in: productIds },
         deletedAt: null,
         isAvailable: true,
+      },
+      include: {
+        bakery: { select: { id: true, name: true, status: true } },
+        restaurant: { select: { id: true, name: true, status: true } },
+        modifierGroups: {
+          where: { deletedAt: null, isAvailable: true },
+          orderBy: { sortOrder: 'asc' },
+          include: {
+            options: {
+              where: { deletedAt: null, isAvailable: true },
+              orderBy: { sortOrder: 'asc' },
+            },
+          },
+        },
       },
     });
 
@@ -458,6 +487,13 @@ const createOrderHandler = async (req, res) => {
     }
 
     for (const product of products) {
+      const vendorStatus = product.bakery?.status || product.restaurant?.status;
+      if (vendorStatus !== 'approved') {
+        return res.status(400).json({
+          status: 'fail',
+          message: `Product "${product.name}" belongs to a vendor that is not accepting orders`,
+        });
+      }
       if (effectiveBakeryId && product.bakeryId !== effectiveBakeryId) {
         return res.status(400).json({
           status: 'fail',
@@ -486,9 +522,76 @@ const createOrderHandler = async (req, res) => {
 
     for (const item of sanitizedItems) {
       const product = productMap.get(item.productId);
-      const unitPrice = Number.parseFloat(product.price);
+      const selectedIds = new Set(item.selectedModifierOptionIds);
+      const selectedModifierSnapshots = [];
+      let modifierAdjustment = 0;
+      const knownOptionIds = new Set();
+
+      for (const group of product.modifierGroups || []) {
+        const selectedOptions = group.options.filter((option) => {
+          knownOptionIds.add(option.id);
+          return selectedIds.has(option.id);
+        });
+        const selectedCount = selectedOptions.length;
+        const minimum = group.isRequired
+          ? Math.max(1, group.minSelections)
+          : group.minSelections;
+        const maximum = group.selectionType === 'single'
+          ? 1
+          : group.maxSelections;
+
+        if (selectedCount < minimum) {
+          return res.status(400).json({
+            status: 'fail',
+            message: `Modifier group "${group.nameEn}" requires at least ${minimum} selection(s)`,
+          });
+        }
+        if (selectedCount > maximum) {
+          return res.status(400).json({
+            status: 'fail',
+            message: `Modifier group "${group.nameEn}" allows at most ${maximum} selection(s)`,
+          });
+        }
+
+        if (selectedOptions.length) {
+          const options = selectedOptions.map((option) => {
+            const adjustment = Number(option.priceAdjustment);
+            modifierAdjustment += adjustment;
+            return {
+              id: option.id,
+              nameEn: option.nameEn,
+              nameAr: option.nameAr,
+              priceAdjustment: adjustment,
+            };
+          });
+          selectedModifierSnapshots.push({
+            id: group.id,
+            nameEn: group.nameEn,
+            nameAr: group.nameAr,
+            selectionType: group.selectionType,
+            options,
+          });
+        }
+      }
+
+      const foreignOptionId = item.selectedModifierOptionIds.find(
+        (id) => !knownOptionIds.has(id),
+      );
+      if (foreignOptionId) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'A selected modifier option does not belong to this product or is unavailable',
+        });
+      }
+
+      const basePrice = Number.parseFloat(product.price);
+      const unitPrice = basePrice + modifierAdjustment;
       const subtotal = unitPrice * item.quantity;
       totalAmount += subtotal;
+
+      const vendorType = product.bakeryId ? 'bakery' : 'restaurant';
+      const vendorId = product.bakeryId || product.restaurantId;
+      const vendorName = product.bakery?.name || product.restaurant?.name || null;
 
       orderItems.push({
         productId: item.productId,
@@ -496,8 +599,20 @@ const createOrderHandler = async (req, res) => {
         price: unitPrice,
         subtotal,
         specialInstructions: item.specialInstructions,
+        productNameSnapshot: product.name,
+        productImageSnapshot: product.imageUrl,
+        vendorTypeSnapshot: vendorType,
+        vendorIdSnapshot: vendorId,
+        vendorNameSnapshot: vendorName,
+        selectedModifiersSnapshot: selectedModifierSnapshots,
+        modifierAdjustmentSnapshot: modifierAdjustment,
+        unitPriceSnapshot: unitPrice,
+        itemTotalSnapshot: subtotal,
       });
     }
+
+    const deliveryFee = effectiveOrderType === 'delivery' ? getFlatDeliveryFee() : 0;
+    totalAmount += deliveryFee;
 
     // Generate order number
     const orderNumber = `KHB-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -562,6 +677,7 @@ const createOrderHandler = async (req, res) => {
           orderType: effectiveOrderType,
           deliveryAddressId: effectiveOrderType === 'delivery' ? effectiveAddressId : null,
           totalAmount,
+          deliveryFee,
           paymentMethod: codOrder ? PAYMENT_METHODS.CASH_ON_DELIVERY : PAYMENT_METHODS.ONLINE_CARD,
           paymentStatus: codOrder ? PAYMENT_STATUSES.COD_PENDING : PAYMENT_STATUSES.PENDING,
           paymentProvider: codOrder ? PAYMENT_PROVIDERS.COD : null,
@@ -633,11 +749,13 @@ const createOrderHandler = async (req, res) => {
 
     if (vendorUserIds.length) {
       const vendorName = order.bakery?.name || order.restaurant?.name || 'your shop';
+      // Name the buyer: a restaurant for B2B orders, otherwise "a customer".
+      const buyerName = order.restaurantId ? (order.restaurant?.name || 'a restaurant') : 'a customer';
       await notifyUsers({
         prisma,
         userIds: vendorUserIds,
         title: 'New Order Received',
-        message: `You have a new order #${orderNumber} from a customer for ${vendorName}.`,
+        message: `You have a new order #${orderNumber} from ${buyerName} for ${vendorName}.`,
         type: 'order',
         relatedId: order.id,
         createdBy: 'system',
@@ -1056,6 +1174,20 @@ router.patch('/recurring/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Real-time preview of the flat delivery fee applied at order creation.
+// Client-side display only — createOrderHandler independently computes and
+// stores the authoritative fee; this is never trusted back from the client.
+router.get('/delivery-fee', authenticateToken, async (req, res) => {
+  const currency = String(process.env.DEFAULT_CURRENCY || 'JOD').toUpperCase();
+  return res.status(200).json({
+    status: 'success',
+    data: {
+      deliveryFee: getFlatDeliveryFee(),
+      currency,
+    },
+  });
+});
+
 // Get details of a specific order
 router.get('/:orderId', authenticateToken, async (req, res) => {
   try {
@@ -1134,8 +1266,10 @@ router.get('/:orderId/invoice', authenticateToken, async (req, res) => {
 
     const order = await prisma.order.findFirst({
       where: {
-        id: orderId,
         deletedAt: null,
+        // Accept either the order UUID or the human order number, since the
+        // client may resolve the identifier to either one.
+        OR: [{ id: orderId }, { orderNumber: orderId }],
       },
       include: {
         user: {
@@ -1475,6 +1609,12 @@ router.put('/:orderId/status', authenticateToken, async (req, res) => {
     let isAuthorized = false;
     
     if (req.user.role === 'admin') {
+      isAuthorized = true;
+    } else if (isRestaurantBuyerReceiptConfirmation({
+      user: req.user,
+      order,
+      nextStatus: resolvedStatus,
+    })) {
       isAuthorized = true;
     } else if (req.user.role === 'bakery_owner' && order.bakeryId) {
       const bakery = await prisma.bakery.findFirst({

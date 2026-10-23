@@ -5,6 +5,32 @@ const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const router = express.Router();
 const allowTestFallbacks = false;
 
+const resolveOwnedProduct = async (req, productId, { requireApproved = true } = {}) => {
+  const product = await prisma.product.findFirst({
+    where: { id: productId, deletedAt: null },
+    include: {
+      bakery: { select: { ownerId: true, status: true } },
+      restaurant: { select: { ownerId: true, status: true } },
+    },
+  });
+  if (!product) return { error: [404, 'Product not found'] };
+  if (req.user.role === 'admin') return { product };
+  const vendor = product.bakery || product.restaurant;
+  const vendorId = product.bakeryId || product.restaurantId;
+  const selectedVendorId = String(req.headers['x-vendor-id'] || '').trim();
+  if (selectedVendorId && selectedVendorId !== vendorId) {
+    return { error: [403, 'Product does not belong to the selected vendor'] };
+  }
+  const expectedRole = product.bakery ? 'bakery_owner' : 'restaurant_owner';
+  if (!vendor || vendor.ownerId !== req.user.id || req.user.role !== expectedRole) {
+    return { error: [403, 'You do not own this product'] };
+  }
+  if (requireApproved && vendor.status !== 'approved') {
+    return { error: [403, 'Vendor account must be approved to manage modifiers'] };
+  }
+  return { product };
+};
+
 // List all products (can be filtered by bakery, restaurant, category, search term)
 router.get('/', async (req, res) => {
   try {
@@ -60,7 +86,17 @@ router.get('/', async (req, res) => {
               id: true,
               name: true
             }
-          }
+          },
+          modifierGroups: {
+            where: { deletedAt: null, isAvailable: true },
+            orderBy: { sortOrder: 'asc' },
+            include: {
+              options: {
+                where: { deletedAt: null, isAvailable: true },
+                orderBy: { sortOrder: 'asc' },
+              },
+            },
+          },
         },
         take: parseInt(limit),
         skip,
@@ -89,6 +125,224 @@ router.get('/', async (req, res) => {
     });
   }
 });
+
+router.get('/:productId/modifier-groups', async (req, res) => {
+  const groups = await prisma.modifierGroup.findMany({
+    where: {
+      productId: req.params.productId,
+      deletedAt: null,
+      isAvailable: true,
+    },
+    orderBy: { sortOrder: 'asc' },
+    include: {
+      options: {
+        where: { deletedAt: null, isAvailable: true },
+        orderBy: { sortOrder: 'asc' },
+      },
+    },
+  });
+  return res.status(200).json({ status: 'success', data: { modifierGroups: groups } });
+});
+
+router.post(
+  '/:productId/modifier-groups',
+  authenticateToken,
+  authorizeRole(['bakery_owner', 'restaurant_owner', 'admin']),
+  async (req, res) => {
+    const ownership = await resolveOwnedProduct(req, req.params.productId);
+    if (ownership.error) {
+      return res.status(ownership.error[0]).json({ status: 'fail', message: ownership.error[1] });
+    }
+    const {
+      nameEn,
+      nameAr,
+      selectionType = 'single',
+      isRequired = false,
+      minSelections = 0,
+      maxSelections = selectionType === 'single' ? 1 : 1,
+      sortOrder = 0,
+      isAvailable = true,
+    } = req.body;
+    const min = Number.parseInt(minSelections, 10);
+    const max = Number.parseInt(maxSelections, 10);
+    if (!String(nameEn || '').trim() || !String(nameAr || '').trim()) {
+      return res.status(400).json({ status: 'fail', message: 'nameEn and nameAr are required' });
+    }
+    if (!['single', 'multiple'].includes(selectionType) ||
+        !Number.isInteger(min) || !Number.isInteger(max) || min < 0 || max < 1 ||
+        min > max || (selectionType === 'single' && max !== 1)) {
+      return res.status(400).json({ status: 'fail', message: 'Invalid modifier selection constraints' });
+    }
+    const group = await prisma.modifierGroup.create({
+      data: {
+        productId: req.params.productId,
+        nameEn: String(nameEn).trim(),
+        nameAr: String(nameAr).trim(),
+        selectionType,
+        isRequired: Boolean(isRequired),
+        minSelections: isRequired ? Math.max(1, min) : min,
+        maxSelections: max,
+        sortOrder: Number.parseInt(sortOrder, 10) || 0,
+        isAvailable: Boolean(isAvailable),
+        createdBy: req.user.id,
+      },
+      include: { options: true },
+    });
+    return res.status(201).json({ status: 'success', data: { modifierGroup: group } });
+  },
+);
+
+router.put(
+  '/:productId/modifier-groups/:groupId',
+  authenticateToken,
+  authorizeRole(['bakery_owner', 'restaurant_owner', 'admin']),
+  async (req, res) => {
+    const ownership = await resolveOwnedProduct(req, req.params.productId);
+    if (ownership.error) {
+      return res.status(ownership.error[0]).json({ status: 'fail', message: ownership.error[1] });
+    }
+    const existing = await prisma.modifierGroup.findFirst({
+      where: { id: req.params.groupId, productId: req.params.productId, deletedAt: null },
+    });
+    if (!existing) return res.status(404).json({ status: 'fail', message: 'Modifier group not found' });
+    const nextType = req.body.selectionType ?? existing.selectionType;
+    const nextMin = Number.parseInt(req.body.minSelections ?? existing.minSelections, 10);
+    const nextMax = Number.parseInt(req.body.maxSelections ?? existing.maxSelections, 10);
+    if (!['single', 'multiple'].includes(nextType) || nextMin < 0 || nextMax < 1 ||
+        nextMin > nextMax || (nextType === 'single' && nextMax !== 1)) {
+      return res.status(400).json({ status: 'fail', message: 'Invalid modifier selection constraints' });
+    }
+    const group = await prisma.modifierGroup.update({
+      where: { id: existing.id },
+      data: {
+        ...(req.body.nameEn !== undefined && { nameEn: String(req.body.nameEn).trim() }),
+        ...(req.body.nameAr !== undefined && { nameAr: String(req.body.nameAr).trim() }),
+        selectionType: nextType,
+        minSelections: req.body.isRequired === true ? Math.max(1, nextMin) : nextMin,
+        maxSelections: nextMax,
+        ...(req.body.isRequired !== undefined && { isRequired: Boolean(req.body.isRequired) }),
+        ...(req.body.sortOrder !== undefined && { sortOrder: Number.parseInt(req.body.sortOrder, 10) || 0 }),
+        ...(req.body.isAvailable !== undefined && { isAvailable: Boolean(req.body.isAvailable) }),
+        updatedBy: req.user.id,
+      },
+      include: { options: { where: { deletedAt: null }, orderBy: { sortOrder: 'asc' } } },
+    });
+    return res.status(200).json({ status: 'success', data: { modifierGroup: group } });
+  },
+);
+
+router.delete(
+  '/:productId/modifier-groups/:groupId',
+  authenticateToken,
+  authorizeRole(['bakery_owner', 'restaurant_owner', 'admin']),
+  async (req, res) => {
+    const ownership = await resolveOwnedProduct(req, req.params.productId);
+    if (ownership.error) {
+      return res.status(ownership.error[0]).json({ status: 'fail', message: ownership.error[1] });
+    }
+    const result = await prisma.modifierGroup.updateMany({
+      where: { id: req.params.groupId, productId: req.params.productId, deletedAt: null },
+      data: { deletedAt: new Date(), isAvailable: false, updatedBy: req.user.id },
+    });
+    if (!result.count) return res.status(404).json({ status: 'fail', message: 'Modifier group not found' });
+    return res.status(200).json({ status: 'success', message: 'Modifier group deleted' });
+  },
+);
+
+router.post(
+  '/:productId/modifier-groups/:groupId/options',
+  authenticateToken,
+  authorizeRole(['bakery_owner', 'restaurant_owner', 'admin']),
+  async (req, res) => {
+    const ownership = await resolveOwnedProduct(req, req.params.productId);
+    if (ownership.error) {
+      return res.status(ownership.error[0]).json({ status: 'fail', message: ownership.error[1] });
+    }
+    const group = await prisma.modifierGroup.findFirst({
+      where: { id: req.params.groupId, productId: req.params.productId, deletedAt: null },
+    });
+    if (!group) return res.status(404).json({ status: 'fail', message: 'Modifier group not found' });
+    const adjustment = Number(req.body.priceAdjustment ?? 0);
+    if (!String(req.body.nameEn || '').trim() || !String(req.body.nameAr || '').trim() ||
+        !Number.isFinite(adjustment) || adjustment < 0) {
+      return res.status(400).json({ status: 'fail', message: 'Valid bilingual names and non-negative priceAdjustment are required' });
+    }
+    const option = await prisma.modifierOption.create({
+      data: {
+        modifierGroupId: group.id,
+        nameEn: String(req.body.nameEn).trim(),
+        nameAr: String(req.body.nameAr).trim(),
+        priceAdjustment: adjustment,
+        sortOrder: Number.parseInt(req.body.sortOrder, 10) || 0,
+        isAvailable: req.body.isAvailable !== false,
+        createdBy: req.user.id,
+      },
+    });
+    return res.status(201).json({ status: 'success', data: { modifierOption: option } });
+  },
+);
+
+router.put(
+  '/:productId/modifier-groups/:groupId/options/:optionId',
+  authenticateToken,
+  authorizeRole(['bakery_owner', 'restaurant_owner', 'admin']),
+  async (req, res) => {
+    const ownership = await resolveOwnedProduct(req, req.params.productId);
+    if (ownership.error) {
+      return res.status(ownership.error[0]).json({ status: 'fail', message: ownership.error[1] });
+    }
+    const option = await prisma.modifierOption.findFirst({
+      where: {
+        id: req.params.optionId,
+        modifierGroupId: req.params.groupId,
+        deletedAt: null,
+        modifierGroup: { productId: req.params.productId, deletedAt: null },
+      },
+    });
+    if (!option) return res.status(404).json({ status: 'fail', message: 'Modifier option not found' });
+    const adjustment = req.body.priceAdjustment === undefined
+      ? Number(option.priceAdjustment)
+      : Number(req.body.priceAdjustment);
+    if (!Number.isFinite(adjustment) || adjustment < 0) {
+      return res.status(400).json({ status: 'fail', message: 'priceAdjustment must be non-negative' });
+    }
+    const updated = await prisma.modifierOption.update({
+      where: { id: option.id },
+      data: {
+        ...(req.body.nameEn !== undefined && { nameEn: String(req.body.nameEn).trim() }),
+        ...(req.body.nameAr !== undefined && { nameAr: String(req.body.nameAr).trim() }),
+        priceAdjustment: adjustment,
+        ...(req.body.sortOrder !== undefined && { sortOrder: Number.parseInt(req.body.sortOrder, 10) || 0 }),
+        ...(req.body.isAvailable !== undefined && { isAvailable: Boolean(req.body.isAvailable) }),
+        updatedBy: req.user.id,
+      },
+    });
+    return res.status(200).json({ status: 'success', data: { modifierOption: updated } });
+  },
+);
+
+router.delete(
+  '/:productId/modifier-groups/:groupId/options/:optionId',
+  authenticateToken,
+  authorizeRole(['bakery_owner', 'restaurant_owner', 'admin']),
+  async (req, res) => {
+    const ownership = await resolveOwnedProduct(req, req.params.productId);
+    if (ownership.error) {
+      return res.status(ownership.error[0]).json({ status: 'fail', message: ownership.error[1] });
+    }
+    const result = await prisma.modifierOption.updateMany({
+      where: {
+        id: req.params.optionId,
+        modifierGroupId: req.params.groupId,
+        deletedAt: null,
+        modifierGroup: { productId: req.params.productId, deletedAt: null },
+      },
+      data: { deletedAt: new Date(), isAvailable: false, updatedBy: req.user.id },
+    });
+    if (!result.count) return res.status(404).json({ status: 'fail', message: 'Modifier option not found' });
+    return res.status(200).json({ status: 'success', message: 'Modifier option deleted' });
+  },
+);
 
 // Get details of a specific product
 router.get('/:productId', async (req, res) => {
@@ -130,7 +384,17 @@ router.get('/:productId', async (req, res) => {
             city: true,
             cuisineType: true
           }
-        }
+        },
+        modifierGroups: {
+          where: { deletedAt: null, isAvailable: true },
+          orderBy: { sortOrder: 'asc' },
+          include: {
+            options: {
+              where: { deletedAt: null, isAvailable: true },
+              orderBy: { sortOrder: 'asc' },
+            },
+          },
+        },
       }
     });
 

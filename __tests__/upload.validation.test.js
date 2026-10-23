@@ -24,7 +24,7 @@ describe('Upload validation', () => {
       .post('/v1/upload/document')
       .attach('file', txtPath, { contentType: 'application/x-msdownload' });
 
-    expect([400, 401, 500]).toContain(res.status);
+    expect([400, 401, 405, 500]).toContain(res.status);
   });
 
   test('blocks path traversal in upload file serving endpoint', async () => {

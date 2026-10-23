@@ -33,7 +33,7 @@ This guide will help you import and use the Khubzati API Postman collection.
    - Click the eye icon (👁️) next to the environment dropdown
    - Or go to **Environments** → `Khubzati API - Local`
    - Update variables:
-     - `baseUrl`: `http://localhost:3000` (default)
+     - `baseUrl`: `https://api.khubzati.com` (default)
      - `adminEmail`: Your admin email (default: `admin@khubzati.com`)
      - `adminPassword`: Your admin password (default: `Admin@1234`)
 
@@ -109,7 +109,7 @@ The collection uses Postman variables for flexibility:
 
 | Variable | Default Value | Description |
 |----------|--------------|-------------|
-| `baseUrl` | `http://localhost:3000` | API base URL |
+| `baseUrl` | `https://api.khubzati.com` | API base URL |
 | `authToken` | *(auto-filled)* | JWT authentication token |
 | `userId` | *(auto-filled)* | Current user ID |
 | `userRole` | *(auto-filled)* | Current user role |
@@ -175,7 +175,7 @@ To test against different environments:
 
 1. Go to **Environments** → `Khubzati API - Local`
 2. Update `baseUrl`:
-   - **Local:** `http://localhost:3000`
+   - **Local:** `https://api.khubzati.com`
    - **Production:** `https://api.khubzati.com`
    - **Staging:** `https://staging-api.khubzati.com`
 

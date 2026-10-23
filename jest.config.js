@@ -3,5 +3,5 @@ module.exports = {
   testMatch: ['**/__tests__/**/*.test.js'],
   clearMocks: true,
   globalTeardown: '<rootDir>/scripts/jest-global-teardown.js',
-  setupFilesAfterEnv: [],
+  setupFilesAfterEnv: ['<rootDir>/scripts/jest-setup-after-env.js'],
 };

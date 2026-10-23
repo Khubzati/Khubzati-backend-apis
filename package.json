@@ -10,6 +10,7 @@
     "start": "node ./src/app.js",
     "start:kpi-worker": "node ./src/workers/kpi-worker.js",
     "start:kpi-worker:dev": "nodemon ./src/workers/kpi-worker.js --watch src",
+    "cleanup:onboarding-uploads": "node scripts/cleanup-onboarding-uploads.js",
     "lint": "next lint",
     "start:dev": "nodemon ./src/app.js --watch",
     "db:generate": "npx prisma generate",
