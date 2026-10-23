@@ -1,0 +1,481 @@
+[
+  {
+    "key": "khubz_arabi",
+    "englishName": "Arabic Pita Bread",
+    "arabicName": "خبز عربي",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Arabic%20Bread%20Pita.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Soft round pocket bread popular across Jordan and the Levant.",
+    "tags": [
+      "flatbread",
+      "traditional",
+      "pocket"
+    ],
+    "sortOrder": 10,
+    "isActive": true
+  },
+  {
+    "key": "khubz_shrak",
+    "englishName": "Shrak Bread",
+    "arabicName": "خبز شراك",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Pita%20Flatbread.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Very thin Jordanian bread traditionally cooked on a domed griddle.",
+    "tags": [
+      "flatbread",
+      "jordanian",
+      "saj"
+    ],
+    "sortOrder": 20,
+    "isActive": true
+  },
+  {
+    "key": "khubz_taboon",
+    "englishName": "Taboon Bread",
+    "arabicName": "خبز طابون",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Pita%20bread%20in%20Bethlehem%2C%20Palestine%20in%202018.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Rustic Palestinian flatbread traditionally baked in a clay oven.",
+    "tags": [
+      "flatbread",
+      "palestinian",
+      "oven"
+    ],
+    "sortOrder": 30,
+    "isActive": true
+  },
+  {
+    "key": "khubz_saj",
+    "englishName": "Saj Bread",
+    "arabicName": "خبز صاج",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Pita%20Flatbread.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Thin flexible flatbread cooked on a convex metal griddle.",
+    "tags": [
+      "flatbread",
+      "saj",
+      "wrap"
+    ],
+    "sortOrder": 40,
+    "isActive": true
+  },
+  {
+    "key": "khubz_tannour",
+    "englishName": "Tannour Bread",
+    "arabicName": "خبز تنور",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/2021-04-26%2020%2024%2047%20Tandori%20bread%20from%20the%20Herndon%20Grill%20Kabob%20in%20the%20Franklin%20Farm%20section%20of%20Oak%20Hill%2C%20Fairfax%20County%2C%20Virginia.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Bread baked against the heated interior of a traditional oven.",
+    "tags": [
+      "flatbread",
+      "oven",
+      "traditional"
+    ],
+    "sortOrder": 50,
+    "isActive": true
+  },
+  {
+    "key": "kaak_quds",
+    "englishName": "Jerusalem Kaak",
+    "arabicName": "كعك القدس",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/%D8%AE%D8%A8%D8%B2%20%D8%A7%D9%84%D8%B3%D9%85%D8%B3%D9%85%20%D9%88%D8%AE%D8%A8%D8%B2%20%D8%A7%D9%84%D8%AC%D8%A8%D9%86%20%D9%85%D9%86%20%D8%A7%D9%84%D8%A3%D9%83%D9%84%D8%A7%D8%AA%20%D8%A7%D9%84%D9%85%D8%B4%D9%87%D9%88%D8%B1%D8%A9%20%D9%81%D9%8A%20%D8%A7%D9%84%D8%A3%D8%B9%D9%8A%D8%A7%D8%AF%20%D8%A7%D9%84%D9%85%D8%B3%D9%8A%D8%AD%D9%8A%D8%A9.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Sesame-topped street bread associated with Jerusalem.",
+    "tags": [
+      "sesame",
+      "street_food",
+      "levantine"
+    ],
+    "sortOrder": 60,
+    "isActive": true
+  },
+  {
+    "key": "khubz_hamam",
+    "englishName": "Hamam Bread Rolls",
+    "arabicName": "خبز حمام",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Wheat%20flour%20buns.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Small soft rolls used for sandwiches and snacks.",
+    "tags": [
+      "roll",
+      "sandwich",
+      "soft"
+    ],
+    "sortOrder": 70,
+    "isActive": true
+  },
+  {
+    "key": "khubz_samoon",
+    "englishName": "Samoon Bread",
+    "arabicName": "خبز صمون",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Breads%20from%20a%20local%20bakery.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Iraqi-style bread roll commonly used for sandwiches.",
+    "tags": [
+      "roll",
+      "iraqi",
+      "sandwich"
+    ],
+    "sortOrder": 80,
+    "isActive": true
+  },
+  {
+    "key": "khubz_franki",
+    "englishName": "French-Style Bread",
+    "arabicName": "خبز فرنجي",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/9457French%20bagette%2001.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Crusty white bread used for sandwiches.",
+    "tags": [
+      "white_bread",
+      "french",
+      "sandwich"
+    ],
+    "sortOrder": 90,
+    "isActive": true
+  },
+  {
+    "key": "khubz_baladi",
+    "englishName": "Baladi Bread",
+    "arabicName": "خبز بلدي",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Pita%20Bread%2C%20Khan%20el-Khalili%20El%20Cairo%20-%20panoramio.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Rustic Egyptian-style round flatbread often made with whole wheat.",
+    "tags": [
+      "flatbread",
+      "egyptian",
+      "wheat"
+    ],
+    "sortOrder": 100,
+    "isActive": true
+  },
+  {
+    "key": "khubz_mashrouh",
+    "englishName": "Mashrouh Bread",
+    "arabicName": "خبز مشروح",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Pita%20Flatbread.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Large thin Levantine bread suitable for wraps.",
+    "tags": [
+      "flatbread",
+      "levantine",
+      "wrap"
+    ],
+    "sortOrder": 110,
+    "isActive": true
+  },
+  {
+    "key": "khubz_markook",
+    "englishName": "Markook Bread",
+    "arabicName": "خبز مرقوق",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Pita%20Flatbread.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Paper-thin flatbread traditionally baked on a saj.",
+    "tags": [
+      "flatbread",
+      "thin",
+      "traditional"
+    ],
+    "sortOrder": 120,
+    "isActive": true
+  },
+  {
+    "key": "manakish",
+    "englishName": "Manakish",
+    "arabicName": "مناقيش",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Breads%20from%20a%20local%20bakery.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Levantine topped flatbread commonly made with zaatar or cheese.",
+    "tags": [
+      "flatbread",
+      "levantine",
+      "breakfast"
+    ],
+    "sortOrder": 130,
+    "isActive": true
+  },
+  {
+    "key": "khubz_asmar",
+    "englishName": "Brown Bread",
+    "arabicName": "خبز أسمر",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/1%D8%AE%D8%A8%D8%B2%20%D8%A3%D8%B3%D9%85%D8%B1.png",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Brown wheat bread offered as an alternative to white bread.",
+    "tags": [
+      "wheat",
+      "brown_bread"
+    ],
+    "sortOrder": 140,
+    "isActive": true
+  },
+  {
+    "key": "khubz_nakhalah",
+    "englishName": "Bran Bread",
+    "arabicName": "خبز نخالة",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Brown%20bread%20made%20with%20dinkel%20wheat%20and%20millet%2002.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Bread containing wheat bran for a hearty texture.",
+    "tags": [
+      "bran",
+      "wheat",
+      "fiber"
+    ],
+    "sortOrder": 150,
+    "isActive": true
+  },
+  {
+    "key": "khubz_shaeer",
+    "englishName": "Barley Bread",
+    "arabicName": "خبز شعير",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/A%20loaf%20of%20wheat%20and%20rye%20bread.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Rustic loaf containing barley flour, often mixed with wheat.",
+    "tags": [
+      "barley",
+      "rustic",
+      "loaf"
+    ],
+    "sortOrder": 160,
+    "isActive": true
+  },
+  {
+    "key": "khubz_shofan",
+    "englishName": "Oat Bread",
+    "arabicName": "خبز شوفان",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Vierkornbrot%2001.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Hearty bread prepared with oats or oat flour.",
+    "tags": [
+      "oat",
+      "loaf",
+      "grains"
+    ],
+    "sortOrder": 170,
+    "isActive": true
+  },
+  {
+    "key": "khubz_multigrain",
+    "englishName": "Multigrain Bread",
+    "arabicName": "خبز متعدد الحبوب",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Vierkornbrot%2002.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Bread made with a combination of grains and seeds.",
+    "tags": [
+      "multigrain",
+      "loaf",
+      "seeds"
+    ],
+    "sortOrder": 180,
+    "isActive": true
+  },
+  {
+    "key": "toast_white",
+    "englishName": "White Toast Bread",
+    "arabicName": "توست أبيض",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Slices%20of%20bread%20and%20tomato.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Soft sliced white bread for sandwiches and toast.",
+    "tags": [
+      "toast",
+      "sandwich",
+      "white_bread"
+    ],
+    "sortOrder": 190,
+    "isActive": true
+  },
+  {
+    "key": "toast_brown",
+    "englishName": "Brown Toast Bread",
+    "arabicName": "توست أسمر",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Brown%20bread%20made%20with%20dinkel%20wheat%20and%20millet%2004.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Sliced brown bread commonly served toasted.",
+    "tags": [
+      "toast",
+      "brown_bread",
+      "sandwich"
+    ],
+    "sortOrder": 200,
+    "isActive": true
+  },
+  {
+    "key": "baguette",
+    "englishName": "French Baguette",
+    "arabicName": "باغيت فرنسي",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Baguette%20001.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Long French loaf with a crisp crust and airy interior.",
+    "tags": [
+      "french",
+      "crusty",
+      "loaf"
+    ],
+    "sortOrder": 210,
+    "isActive": true
+  },
+  {
+    "key": "croissant",
+    "englishName": "Butter Croissant",
+    "arabicName": "كرواسون زبدة",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Croissant-Madrid-2009.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Flaky crescent-shaped laminated pastry made with butter.",
+    "tags": [
+      "pastry",
+      "french",
+      "breakfast"
+    ],
+    "sortOrder": 220,
+    "isActive": true
+  },
+  {
+    "key": "sourdough",
+    "englishName": "Sourdough Bread",
+    "arabicName": "خبز العجين المخمر",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Pain%20cocotte%201.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Naturally fermented bread with a tangy flavor and chewy crust.",
+    "tags": [
+      "sourdough",
+      "artisan",
+      "loaf"
+    ],
+    "sortOrder": 230,
+    "isActive": true
+  },
+  {
+    "key": "ciabatta",
+    "englishName": "Ciabatta",
+    "arabicName": "تشاباتا",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Baguette%20and%20Ciabatta%20%284202803060%29.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Italian bread with an open crumb and lightly crisp crust.",
+    "tags": [
+      "italian",
+      "artisan",
+      "sandwich"
+    ],
+    "sortOrder": 240,
+    "isActive": true
+  },
+  {
+    "key": "focaccia",
+    "englishName": "Focaccia",
+    "arabicName": "فوكاتشيا",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Focaccia%20mit%20Oliven02.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Soft Italian flatbread commonly topped with olive oil and herbs.",
+    "tags": [
+      "italian",
+      "flatbread",
+      "olive_oil"
+    ],
+    "sortOrder": 250,
+    "isActive": true
+  },
+  {
+    "key": "bagel",
+    "englishName": "Bagel",
+    "arabicName": "بيغل",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Freshippo%20cranberry%20bagels.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Ring-shaped boiled and baked bread with a chewy texture.",
+    "tags": [
+      "ring",
+      "breakfast",
+      "sandwich"
+    ],
+    "sortOrder": 260,
+    "isActive": true
+  },
+  {
+    "key": "brioche",
+    "englishName": "Brioche",
+    "arabicName": "بريوش",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Briush.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Rich soft bread made with eggs and butter.",
+    "tags": [
+      "enriched",
+      "sweet",
+      "soft"
+    ],
+    "sortOrder": 270,
+    "isActive": true
+  },
+  {
+    "key": "rye_bread",
+    "englishName": "Rye Bread",
+    "arabicName": "خبز الجاودار",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/A%20loaf%20of%20wheat%20and%20rye%20bread.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Dense flavorful bread made with rye flour.",
+    "tags": [
+      "rye",
+      "loaf",
+      "hearty"
+    ],
+    "sortOrder": 280,
+    "isActive": true
+  },
+  {
+    "key": "bread_roll",
+    "englishName": "Bread Roll",
+    "arabicName": "خبز رول",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Wheat%20flour%20buns.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Individual soft bread roll used for sandwiches or as a side.",
+    "tags": [
+      "roll",
+      "sandwich",
+      "soft"
+    ],
+    "sortOrder": 290,
+    "isActive": true
+  },
+  {
+    "key": "garlic_bread",
+    "englishName": "Garlic Bread",
+    "arabicName": "خبز بالثوم",
+    "imageUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/%22Garlic%20Bread%22%20%2813348195234%29.jpg",
+    "imageSource": "Wikimedia Commons",
+    "imageCredit": "Author and license: see Wikimedia Commons file page (verify before reuse)",
+    "description": "Bread flavored with garlic and often butter or olive oil.",
+    "tags": [
+      "garlic",
+      "side",
+      "toasted"
+    ],
+    "sortOrder": 300,
+    "isActive": true
+  }
+]

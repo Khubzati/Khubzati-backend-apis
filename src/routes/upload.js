@@ -92,8 +92,17 @@ const enforceOnboardingMime = async (req, file) => {
   if (!req.onboardingUpload) return;
   const allowed = req.onboardingUpload.purpose === 'commercial_registry' ||
     req.onboardingUpload.purpose === 'identity_document'
-    ? new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/webp'])
-    : new Set(['image/jpeg', 'image/png', 'image/webp']);
+    ? new Set([
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'image/jpeg', 'image/jpg', 'image/png', 'image/gif',
+        'image/webp', 'image/heic', 'image/heif',
+      ])
+    : new Set([
+        'image/jpeg', 'image/jpg', 'image/png', 'image/gif',
+        'image/webp', 'image/heic', 'image/heif',
+      ]);
   if (!allowed.has(file.mimetype)) {
     await fs.promises.unlink(file.path).catch(() => {});
     throw Object.assign(new Error('File type is not allowed for this onboarding purpose'), {
@@ -151,7 +160,11 @@ const extensionByMime = {
   'image/gif': '.gif',
   'image/webp': '.webp',
   'image/svg+xml': '.svg',
+  'image/heic': '.heic',
+  'image/heif': '.heif',
   'application/pdf': '.pdf',
+  'application/msword': '.doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
   'text/plain': '.txt',
 };
 
@@ -307,14 +320,18 @@ const fileFilter = (req, file, cb) => {
     'image/gif',
     'image/webp',
     'image/svg+xml',
+    'image/heic',
+    'image/heif',
     'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'text/plain'
   ];
-  
+
   if (allowedMimes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Invalid file type. Only images (JPEG, PNG, GIF, WebP) and PDF files are allowed.'), false);
+    cb(new Error('Invalid file type. Only images (JPEG, PNG, GIF, WebP, HEIC) and documents (PDF, Word) are allowed.'), false);
   }
 };
 
@@ -335,12 +352,14 @@ const imageOnlyFilter = (req, file, cb) => {
     'image/gif',
     'image/webp',
     'image/svg+xml',
+    'image/heic',
+    'image/heif',
   ];
 
   if (allowedImageMimes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Invalid image type. Only PNG, JPG, JPEG, SVG, GIF, and WebP are allowed.'), false);
+    cb(new Error('Invalid image type. Only PNG, JPG, JPEG, SVG, GIF, WebP, and HEIC are allowed.'), false);
   }
 };
 
