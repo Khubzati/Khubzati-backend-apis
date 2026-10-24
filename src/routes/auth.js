@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
 const { sendOTPviaSMS } = require('../services/smsService');
+const { sendRegistrationOtpEmail } = require('../services/otpEmailService');
 const { sendOtpPushToMany } = require('../services/pushNotificationService');
 const { notifyUser } = require('../services/notificationDispatchService');
 const { authenticateToken } = require('../middleware/auth');
@@ -1380,6 +1381,10 @@ router.post('/register', async (req, res) => {
       typeof email === 'string' ? email.trim().toLowerCase() : email;
     const normalizedPassword =
       typeof password === 'string' ? password.trim() : password;
+    const emailSignup = ['bakery_owner', 'restaurant_owner'].includes(role);
+    if (emailSignup && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(normalizedEmail || '')) {
+      return res.status(400).json({ status: 'fail', message: 'A valid email is required for signup' });
+    }
 
     if (
       requiresFullCredentials &&
@@ -1419,6 +1424,9 @@ router.post('/register', async (req, res) => {
     });
 
     if (existingUser) {
+      if (emailSignup && (existingUser.email !== normalizedEmail || existingUser.role !== role)) {
+        return res.status(409).json({ status: 'fail', message: 'An account with these details already exists. Please log in.' });
+      }
       if (existingUser.deletedAt) {
         return res.status(403).json({
           status: 'fail',
@@ -1468,6 +1476,20 @@ router.post('/register', async (req, res) => {
 
       if (deviceToken) {
         await upsertDeviceToken(existingUser.id, deviceToken, platform);
+      }
+
+      if (emailSignup) {
+        try {
+          await sendRegistrationOtpEmail(existingUser.email, generatedOtp);
+        } catch (error) {
+          console.error('Signup email delivery failed:', error.message);
+          return res.status(503).json({ status: 'error', message: 'Unable to send verification email. Please try again later.' });
+        }
+        return res.status(200).json({
+          status: 'success',
+          data: { verification_id: existingUser.email, verificationId: existingUser.email, expiresAt: otpExpiry },
+          message: 'Verification code sent to your email',
+        });
       }
 
       if (normalizedPhoneNumber || existingUser.phoneNumber) {
@@ -1559,6 +1581,20 @@ router.post('/register', async (req, res) => {
         commercialRegistryUrl,
         registrationDocumentUrl,
         email: normalizedEmail,
+      });
+    }
+
+    if (emailSignup) {
+      try {
+        await sendRegistrationOtpEmail(user.email, user.otp);
+      } catch (error) {
+        console.error('Signup email delivery failed:', error.message);
+        return res.status(503).json({ status: 'error', message: 'Unable to send verification email. Please try again later.' });
+      }
+      return res.status(201).json({
+        status: 'success',
+        data: { verification_id: user.email, verificationId: user.email, expiresAt: user.otpExpiry },
+        message: 'Verification code sent to your email',
       });
     }
 
@@ -1999,6 +2035,20 @@ router.post('/resend-otp', otpRouteLimiter, async (req, res) => {
     // Persist device token if provided (for future push sends)
     if (deviceToken) {
       await upsertDeviceToken(user.id, deviceToken, platform);
+    }
+
+    if (purpose === 'registration' && ['bakery_owner', 'restaurant_owner'].includes(user.role)) {
+      try {
+        await sendRegistrationOtpEmail(user.email, otp);
+      } catch (error) {
+        console.error('Signup email resend failed:', error.message);
+        return res.status(503).json({ status: 'error', message: 'Unable to send verification email. Please try again later.' });
+      }
+      return res.status(200).json({
+        status: 'success',
+        data: { verificationId: user.email, expiresAt: otpExpiry },
+        message: 'Verification code sent to your email',
+      });
     }
 
     // Send OTP via SMS if phone number is available
