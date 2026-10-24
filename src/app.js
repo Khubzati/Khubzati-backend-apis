@@ -85,6 +85,12 @@ const configuredCorsOrigins = String(process.env.CORS_ORIGINS || '')
 const devCorsOriginPattern =
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|10\.0\.2\.2)(:\d+)?$/i;
 
+// Allow the Khubzati admin dashboard's Vercel deployments (production + per-commit
+// previews). Their hostnames carry a per-deploy hash, so match the project/team
+// suffix instead of pinning exact URLs in CORS_ORIGINS.
+const adminVercelOriginPattern =
+  /^https:\/\/admin-[a-z0-9-]*khubzati1\.vercel\.app$/i;
+
 if (isProduction && configuredCorsOrigins.length === 0) {
   throw new Error(
     'CORS_ORIGINS must contain at least one allowed origin in production.',
@@ -140,6 +146,11 @@ app.use(
       // Always allow loopback origins to support local admin/front-end development
       // against remote environments (e.g. Railway production APIs).
       if (devCorsOriginPattern.test(normalizedOrigin)) {
+        return callback(null, true);
+      }
+
+      // Allow the admin dashboard's Vercel deployments (hashed preview/prod URLs).
+      if (adminVercelOriginPattern.test(normalizedOrigin)) {
         return callback(null, true);
       }
 
