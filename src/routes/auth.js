@@ -1480,7 +1480,7 @@ router.post('/register', async (req, res) => {
 
       if (emailSignup) {
         try {
-          await sendRegistrationOtpEmail(existingUser.email, generatedOtp);
+          await sendRegistrationOtpEmail(existingUser.email, generatedOtp, OTP_EXPIRY_MINUTES);
         } catch (error) {
           console.error('Signup email delivery failed:', error.message);
           return res.status(503).json({ status: 'error', message: 'Unable to send verification email. Please try again later.' });
@@ -1586,7 +1586,7 @@ router.post('/register', async (req, res) => {
 
     if (emailSignup) {
       try {
-        await sendRegistrationOtpEmail(user.email, user.otp);
+        await sendRegistrationOtpEmail(user.email, user.otp, OTP_EXPIRY_MINUTES);
       } catch (error) {
         console.error('Signup email delivery failed:', error.message);
         return res.status(503).json({ status: 'error', message: 'Unable to send verification email. Please try again later.' });
@@ -2039,7 +2039,7 @@ router.post('/resend-otp', otpRouteLimiter, async (req, res) => {
 
     if (purpose === 'registration' && ['bakery_owner', 'restaurant_owner'].includes(user.role)) {
       try {
-        await sendRegistrationOtpEmail(user.email, otp);
+        await sendRegistrationOtpEmail(user.email, otp, OTP_EXPIRY_MINUTES);
       } catch (error) {
         console.error('Signup email resend failed:', error.message);
         return res.status(503).json({ status: 'error', message: 'Unable to send verification email. Please try again later.' });
