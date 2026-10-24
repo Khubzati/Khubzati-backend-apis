@@ -1,8 +1,9 @@
-const nodemailer = require('nodemailer');
+const fs = require('fs');
 const path = require('path');
 
 const LOGO_PATH = path.join(__dirname, '..', 'assets', 'khubzati-logo-email.png');
 const LOGO_CID = 'khubzatiLogo';
+const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 
 // Brand palette
 const CREAM = '#F7F0E5';
@@ -10,6 +11,14 @@ const WHITE = '#FFFFFF';
 const COCOA = '#542D20';
 const CARAMEL = '#C9793B';
 const MUTED = '#8A7461';
+
+// Read the logo once at startup and cache its base64 for inline delivery.
+let LOGO_BASE64 = null;
+try {
+  LOGO_BASE64 = fs.readFileSync(LOGO_PATH).toString('base64');
+} catch (err) {
+  console.warn('OTP email logo not found at', LOGO_PATH, '-', err.message);
+}
 
 /**
  * Premium, email-safe (Gmail / Apple Mail / Outlook) RTL verification email.
@@ -102,36 +111,64 @@ function buildOtpEmailText(otp, expiryMinutes) {
 إذا لم تطلب هذا الرمز، يمكنك تجاهل هذه الرسالة. لا تشارك هذا الرمز مع أي شخص.`;
 }
 
+/**
+ * Sends the OTP email through the Resend HTTPS API.
+ * Render's free plan blocks outbound SMTP ports (25/465/587), so SMTP times out;
+ * the HTTPS API avoids that entirely.
+ */
 async function sendRegistrationOtpEmail(email, otp, expiryMinutes = 10) {
-  const { SMTP_HOST, SMTP_USER, SMTP_PASS, SMTP_FROM_EMAIL } = process.env;
-  const from = SMTP_FROM_EMAIL || SMTP_USER;
-  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS || !from) {
-    throw new Error('Signup email delivery is not configured');
+  const apiKey = process.env.RESEND_API_KEY || process.env.SMTP_PASS;
+  const from =
+    process.env.RESEND_FROM_EMAIL ||
+    process.env.SMTP_FROM_EMAIL ||
+    'onboarding@resend.dev';
+  const fromName = process.env.SMTP_FROM_NAME || 'Khubzati';
+  if (!apiKey) {
+    throw new Error('Signup email delivery is not configured (missing RESEND_API_KEY)');
   }
-  const transport = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: String(process.env.SMTP_SECURE || 'false') === 'true',
-    auth: { user: SMTP_USER, pass: SMTP_PASS },
-    connectionTimeout: 10000,
-    socketTimeout: 15000,
-  });
-  const result = await transport.sendMail({
-    from: { name: process.env.SMTP_FROM_NAME || 'Khubzati', address: from },
-    to: email,
+
+  const payload = {
+    from: `${fromName} <${from}>`,
+    to: [email],
     subject: 'رمز التحقق الخاص بك في خبزاتي',
-    text: buildOtpEmailText(otp, expiryMinutes),
     html: buildOtpEmailHtml(otp, expiryMinutes),
-    attachments: [
+    text: buildOtpEmailText(otp, expiryMinutes),
+  };
+  if (LOGO_BASE64) {
+    payload.attachments = [
       {
         filename: 'khubzati-logo.png',
-        path: LOGO_PATH,
-        cid: LOGO_CID,
+        content: LOGO_BASE64,
+        content_id: LOGO_CID,
       },
-    ],
-  });
-  if (!result.accepted?.length) {
-    throw new Error('Email provider rejected the signup recipient');
+    ];
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  let response;
+  try {
+    response = await fetch(RESEND_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    let detail = '';
+    try {
+      detail = JSON.stringify(await response.json());
+    } catch (_) {
+      detail = await response.text().catch(() => '');
+    }
+    throw new Error(`Resend API error ${response.status}: ${detail}`);
   }
 }
 
