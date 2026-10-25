@@ -1489,7 +1489,7 @@ router.post('/register', async (req, res) => {
         await upsertDeviceToken(existingUser.id, deviceToken, platform);
       }
 
-      if (emailSignup) {
+      if (existingUser.email) {
         try {
           await sendRegistrationOtpEmail(existingUser.email, generatedOtp, OTP_EXPIRY_MINUTES);
         } catch (error) {
@@ -1595,7 +1595,7 @@ router.post('/register', async (req, res) => {
       });
     }
 
-    if (emailSignup) {
+    if (user.email) {
       try {
         await sendRegistrationOtpEmail(user.email, user.otp, OTP_EXPIRY_MINUTES);
       } catch (error) {
@@ -1798,6 +1798,18 @@ router.post('/login', otpRouteLimiter, async (req, res) => {
           }
         } catch (smsError) {
           console.error('❌ Error sending OTP SMS:', smsError);
+          // Continue anyway - OTP is still generated and stored
+        }
+      }
+
+      // Email is the default OTP channel: deliver the login OTP by email whenever
+      // the account has one (SMS/Twilio is not configured).
+      if (user.email) {
+        try {
+          await sendRegistrationOtpEmail(user.email, generatedOtp, OTP_EXPIRY_MINUTES);
+          console.log(`✅ OTP email sent successfully to ${user.email}`);
+        } catch (emailError) {
+          console.error('❌ Error sending login OTP email:', emailError.message);
           // Continue anyway - OTP is still generated and stored
         }
       }
@@ -2048,11 +2060,11 @@ router.post('/resend-otp', otpRouteLimiter, async (req, res) => {
       await upsertDeviceToken(user.id, deviceToken, platform);
     }
 
-    if (purpose === 'registration' && ['bakery_owner', 'restaurant_owner'].includes(user.role)) {
+    if (user.email) {
       try {
         await sendRegistrationOtpEmail(user.email, otp, OTP_EXPIRY_MINUTES);
       } catch (error) {
-        console.error('Signup email resend failed:', error.message);
+        console.error('OTP email resend failed:', error.message);
         return res.status(503).json({ status: 'error', message: 'Unable to send verification email. Please try again later.' });
       }
       return res.status(200).json({
@@ -2407,7 +2419,14 @@ const handleRequestPasswordReset = async (req, res) => {
       },
     });
 
-    if (user.phoneNumber) {
+    if (user.email) {
+      // Email is the default OTP channel for password reset too.
+      try {
+        await sendRegistrationOtpEmail(user.email, otp, OTP_EXPIRY_MINUTES);
+      } catch (emailError) {
+        console.error('Password reset OTP email error:', emailError.message);
+      }
+    } else if (user.phoneNumber) {
       try {
         await sendOTPviaSMS(user.phoneNumber, otp);
       } catch (smsError) {
