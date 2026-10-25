@@ -40,13 +40,15 @@ function buildOtpEmailHtml(otp, expiryMinutes) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
 <title>رمز التحقق</title>
 </head>
 <body dir="rtl" style="margin:0;padding:0;background-color:${CREAM};">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${CREAM};">
 <tr>
 <td align="center" style="padding:24px 12px;">
-<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background-color:${WHITE};border:1px solid #ECD9C4;border-radius:16px;overflow:hidden;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background-color:${WHITE};border:1px solid #ECD9C4;border-radius:16px;overflow:hidden;">
 <!-- Header -->
 <tr>
 <td align="center" bgcolor="${COCOA}" style="background-color:${COCOA};padding:22px 24px;">
