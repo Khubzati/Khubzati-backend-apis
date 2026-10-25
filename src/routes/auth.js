@@ -1427,12 +1427,11 @@ router.post('/register', async (req, res) => {
       if (emailSignup && (existingUser.email !== normalizedEmail || existingUser.role !== role)) {
         return res.status(409).json({ status: 'fail', message: 'An account with these details already exists. Please log in.' });
       }
-      if (existingUser.deletedAt) {
-        return res.status(403).json({
-          status: 'fail',
-          message: 'Your account is suspended. Please contact support.',
-        });
-      }
+      // A previously DELETED account may re-register and reclaim its email/phone.
+      // NOTE: admin "suspend" and "delete" both set deletedAt today, so this also
+      // lets a suspended user sign up again. Add a separate `suspendedAt` field if
+      // suspension must keep blocking re-registration.
+      const reactivatingDeletedAccount = Boolean(existingUser.deletedAt);
 
       const verificationId =
         normalizedPhoneNumber ||
@@ -1466,12 +1465,24 @@ router.post('/register', async (req, res) => {
       const generatedOtp = generateOtpCode();
       const otpExpiry = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
 
+      const existingUserUpdateData = { otp: generatedOtp, otpExpiry };
+      if (reactivatingDeletedAccount) {
+        // Revive the soft-deleted record as a fresh signup.
+        existingUserUpdateData.deletedAt = null;
+        existingUserUpdateData.isVerified = false;
+        if (typeof normalizedPassword === 'string' && normalizedPassword.length > 0) {
+          const salt = await bcrypt.genSalt(10);
+          existingUserUpdateData.password = await bcrypt.hash(normalizedPassword, salt);
+        }
+        if (normalizedUsername) existingUserUpdateData.username = normalizedUsername;
+        if (fullName) existingUserUpdateData.fullName = fullName;
+        if (normalizedPhoneNumber) existingUserUpdateData.phoneNumber = normalizedPhoneNumber;
+        if (role) existingUserUpdateData.role = role;
+      }
+
       await updateUserWithInfraRecovery({
         where: { id: existingUser.id },
-        data: {
-          otp: generatedOtp,
-          otpExpiry,
-        },
+        data: existingUserUpdateData,
       });
 
       if (deviceToken) {
