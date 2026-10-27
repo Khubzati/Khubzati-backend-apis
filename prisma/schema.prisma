@@ -49,6 +49,27 @@ model User {
   @@map("users")
 }
 
+model PendingRegistration {
+  id                String    @id @default(uuid())
+  username          String    @unique
+  email             String    @unique
+  passwordHash      String    @map("password_hash")
+  fullName          String?   @map("full_name")
+  phoneNumber       String    @unique @map("phone_number")
+  role              UserRole
+  otpHash           String?   @map("otp_hash")
+  otpExpiry         DateTime? @map("otp_expiry")
+  verifiedAt        DateTime? @map("verified_at")
+  registeredUserId  String?   @map("registered_user_id")
+  failedOtpAttempts Int       @default(0) @map("failed_otp_attempts")
+  deviceToken       String?   @map("device_token")
+  platform          String?
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@map("pending_registrations")
+}
+
 model Favorite {
   id         String             @id @default(uuid())
   userId     String             @map("user_id")

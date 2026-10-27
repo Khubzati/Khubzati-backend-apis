@@ -1355,9 +1355,212 @@ const ensureVendorEligibility = async (user) => {
   }
 };
 
-// Register a new user
+// Start restaurant signup without creating a user account. The user is only
+// inserted after the OTP is verified and the client submits the signed ticket.
+router.post('/register/request-otp', otpRouteLimiter, async (req, res) => {
+  try {
+    const username = String(req.body.username || '').trim();
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const password = String(req.body.password || '').trim();
+    const fullName = String(req.body.fullName || '').trim();
+    const phoneNumber = normalizePhoneNumber(req.body.phoneNumber);
+
+    if (!username || !email || !password || !phoneNumber) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Restaurant owner registration requires username, email, password, and phone number',
+      });
+    }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'A valid email is required for signup',
+      });
+    }
+
+    const identifierConditions = [
+      { email },
+      { username },
+      { phoneNumber },
+    ];
+    const existingUser = await prisma.user.findFirst({
+      where: { OR: identifierConditions },
+    });
+    if (existingUser) {
+      return res.status(409).json({
+        status: 'fail',
+        message: 'An account with these details already exists. Please log in.',
+      });
+    }
+
+    // Expired signup attempts should not reserve identifiers indefinitely.
+    await prisma.pendingRegistration.deleteMany({
+      where: { createdAt: { lt: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+    });
+
+    const matchingPending = await prisma.pendingRegistration.findFirst({
+      where: { OR: identifierConditions },
+    });
+    if (matchingPending && matchingPending.email !== email) {
+      return res.status(409).json({
+        status: 'fail',
+        message: 'These signup details are already being used. Please check them and try again.',
+      });
+    }
+
+    const otp = generateOtpCode();
+    const otpExpiry = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+    const passwordHash = await bcrypt.hash(password, await bcrypt.genSalt(10));
+    const otpHash = await bcrypt.hash(otp, await bcrypt.genSalt(10));
+    const deviceToken = resolveDeviceToken(req.body);
+    const platform = req.body.platform || req.body.devicePlatform || null;
+    const pendingData = {
+      username,
+      email,
+      passwordHash,
+      fullName: fullName || null,
+      phoneNumber,
+      role: 'restaurant_owner',
+      otpHash,
+      otpExpiry,
+      verifiedAt: null,
+      failedOtpAttempts: 0,
+      deviceToken,
+      platform,
+    };
+
+    const pending = matchingPending
+      ? await prisma.pendingRegistration.update({
+          where: { id: matchingPending.id },
+          data: pendingData,
+        })
+      : await prisma.pendingRegistration.create({ data: pendingData });
+
+    try {
+      await sendRegistrationOtpEmail(email, otp, OTP_EXPIRY_MINUTES);
+    } catch (error) {
+      console.error('Restaurant signup email delivery failed:', error.message);
+      return res.status(503).json({
+        status: 'error',
+        message: 'Unable to send verification email. Please try again later.',
+      });
+    }
+
+    return res.status(200).json({
+      status: 'success',
+      data: {
+        verificationId: email,
+        verification_id: email,
+        expiresAt: pending.otpExpiry,
+      },
+      message: 'Verification code sent to your email',
+    });
+  } catch (error) {
+    console.error('Restaurant signup OTP request error:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Unable to start restaurant signup',
+    });
+  }
+});
+
+// Register a new user. Restaurant owners must provide the ticket returned by
+// the registration OTP verification flow before an account can be created.
 router.post('/register', async (req, res) => {
   try {
+    const registrationToken = String(req.body.registrationToken || '').trim();
+    if (registrationToken) {
+      let ticket;
+      try {
+        ticket = jwt.verify(registrationToken, getJwtSecret());
+      } catch (_) {
+        return res.status(401).json({
+          status: 'fail',
+          message: 'Registration verification has expired. Please verify your OTP again.',
+        });
+      }
+
+      if (ticket.purpose !== 'verified_restaurant_registration' || !ticket.registrationId) {
+        return res.status(401).json({
+          status: 'fail',
+          message: 'Invalid registration verification token',
+        });
+      }
+
+      const pending = await prisma.pendingRegistration.findUnique({
+        where: { id: ticket.registrationId },
+      });
+      if (!pending || !pending.verifiedAt || pending.role !== 'restaurant_owner') {
+        return res.status(409).json({
+          status: 'fail',
+          message: 'Verified registration details were not found. Please request a new OTP.',
+        });
+      }
+
+      try {
+        const user = await prisma.$transaction(async (tx) => {
+          const currentPending = await tx.pendingRegistration.findUnique({
+            where: { id: pending.id },
+          });
+          if (!currentPending || !currentPending.verifiedAt) {
+            const error = new Error('Registration was already completed');
+            error.statusCode = 409;
+            throw error;
+          }
+
+          if (currentPending.registeredUserId) {
+            const alreadyRegistered = await tx.user.findUnique({
+              where: { id: currentPending.registeredUserId },
+            });
+            if (alreadyRegistered) return alreadyRegistered;
+          }
+
+          const createdUser = await tx.user.create({
+            data: {
+              username: currentPending.username,
+              email: currentPending.email,
+              password: currentPending.passwordHash,
+              fullName: currentPending.fullName,
+              phoneNumber: currentPending.phoneNumber,
+              role: currentPending.role,
+              isVerified: true,
+            },
+          });
+          await tx.pendingRegistration.update({
+            where: { id: currentPending.id },
+            data: {
+              registeredUserId: createdUser.id,
+              passwordHash: '',
+            },
+          });
+          return createdUser;
+        });
+
+        if (pending.deviceToken) {
+          await upsertDeviceToken(
+            user.id,
+            pending.deviceToken,
+            pending.platform,
+          );
+        }
+
+        return res.status(201).json({
+          status: 'success',
+          data: issueAuthResponse(user),
+          is_verified: true,
+          message: 'Account registered successfully',
+        });
+      } catch (error) {
+        if (error.statusCode === 409 || error.code === 'P2002') {
+          return res.status(409).json({
+            status: 'fail',
+            message: 'An account with these details already exists. Please log in.',
+          });
+        }
+        throw error;
+      }
+    }
+
     const {
       username,
       email,
@@ -1375,6 +1578,12 @@ router.post('/register', async (req, res) => {
     const deviceToken = resolveDeviceToken(req.body);
     const platform = req.body.platform || req.body.devicePlatform || null;
     const requiresFullCredentials = role === 'restaurant_owner';
+    if (requiresFullCredentials) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Restaurant owners must verify their OTP before registration.',
+      });
+    }
     const normalizedUsername =
       typeof username === 'string' ? username.trim() : username;
     const normalizedEmail =
@@ -1988,6 +2197,70 @@ router.post('/resend-otp', otpRouteLimiter, async (req, res) => {
     const user = await findUserByIdentifiers(emailToCheck, usernameToCheck, phoneToCheck);
 
     if (!user) {
+      if (purpose === 'registration') {
+        const pendingConditions = [];
+        if (emailToCheck) pendingConditions.push({ email: emailToCheck.trim().toLowerCase() });
+        if (usernameToCheck) pendingConditions.push({ username: usernameToCheck.trim() });
+        if (phoneToCheck) pendingConditions.push({ phoneNumber: phoneToCheck });
+
+        const pending = pendingConditions.length
+          ? await prisma.pendingRegistration.findFirst({
+              where: { OR: pendingConditions },
+            })
+          : null;
+        if (pending?.role === 'restaurant_owner') {
+          if (pending.verifiedAt) {
+            return res.status(409).json({
+              status: 'fail',
+              message: 'OTP already verified. Please complete account registration.',
+            });
+          }
+
+          const limiterKey = phoneToCheck || emailToCheck || usernameToCheck;
+          if (!(await canRequestOtp(limiterKey))) {
+            return res.status(429).json({
+              status: 'fail',
+              message: 'Too many OTP requests. Please try again later.',
+            });
+          }
+
+          const otp = generateOtpCode();
+          const otpExpiry = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+          const otpHash = await bcrypt.hash(otp, await bcrypt.genSalt(10));
+          const deviceToken = resolveDeviceToken(req.body) || pending.deviceToken;
+          const platform = req.body.platform || req.body.devicePlatform || pending.platform;
+          await prisma.pendingRegistration.update({
+            where: { id: pending.id },
+            data: {
+              otpHash,
+              otpExpiry,
+              failedOtpAttempts: 0,
+              deviceToken,
+              platform,
+            },
+          });
+
+          try {
+            await sendRegistrationOtpEmail(pending.email, otp, OTP_EXPIRY_MINUTES);
+          } catch (error) {
+            console.error('Restaurant signup OTP resend email failed:', error.message);
+            return res.status(503).json({
+              status: 'error',
+              message: 'Unable to send verification email. Please try again later.',
+            });
+          }
+
+          return res.status(200).json({
+            status: 'success',
+            data: {
+              verificationId: pending.email,
+              expiresAt: otpExpiry,
+            },
+            message: 'Verification code sent to your email',
+          });
+        }
+      }
+
       return res.status(404).json({
         status: 'fail',
         message: 'User not found',
@@ -2173,6 +2446,96 @@ router.post('/verify-otp', otpRouteLimiter, async (req, res) => {
     const securityIdentifier = phoneToCheck || emailToCheck || usernameToCheck || null;
 
     if (!user) {
+      if (purpose === 'registration') {
+        const pendingConditions = [];
+        if (emailToCheck) pendingConditions.push({ email: emailToCheck.trim().toLowerCase() });
+        if (usernameToCheck) pendingConditions.push({ username: usernameToCheck.trim() });
+        if (phoneToCheck) pendingConditions.push({ phoneNumber: phoneToCheck });
+
+        const pending = pendingConditions.length
+          ? await prisma.pendingRegistration.findFirst({
+              where: { OR: pendingConditions },
+            })
+          : null;
+
+        if (pending?.role === 'restaurant_owner') {
+          if (pending.verifiedAt) {
+            const verificationWindowMs = 15 * 60 * 1000;
+            if (Date.now() - pending.verifiedAt.getTime() > verificationWindowMs) {
+              return res.status(410).json({
+                status: 'fail',
+                message: 'Registration verification expired. Please request a new OTP.',
+              });
+            }
+          } else {
+            if (pending.failedOtpAttempts >= OTP_MAX_FAILED_ATTEMPTS) {
+              return res.status(429).json({
+                status: 'fail',
+                message: 'Too many failed OTP attempts. Please request a new OTP and try again later.',
+              });
+            }
+
+            if (!pending.otpHash || !pending.otpExpiry || pending.otpExpiry < new Date()) {
+              return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid or expired OTP',
+              });
+            }
+
+            const isOtpValid = await bcrypt.compare(String(otp), pending.otpHash);
+            if (!isOtpValid) {
+              await prisma.pendingRegistration.update({
+                where: { id: pending.id },
+                data: { failedOtpAttempts: { increment: 1 } },
+              });
+              await logUserSecurityEvent({
+                prisma,
+                req,
+                userId: null,
+                eventType: 'otp_verify_failed',
+                status: 'pending_registration_mismatch',
+                identifier: securityIdentifier,
+                metadata: { purpose },
+              });
+              return res.status(400).json({
+                status: 'fail',
+                message: 'Invalid or expired OTP',
+              });
+            }
+
+            await prisma.pendingRegistration.update({
+              where: { id: pending.id },
+              data: {
+                verifiedAt: new Date(),
+                otpHash: null,
+                otpExpiry: null,
+                failedOtpAttempts: 0,
+              },
+            });
+          }
+
+          const registrationToken = jwt.sign(
+            {
+              purpose: 'verified_restaurant_registration',
+              registrationId: pending.id,
+            },
+            getJwtSecret(),
+            { ...getJwtSignOptions(), expiresIn: '15m' },
+          );
+
+          return res.status(200).json({
+            status: 'success',
+            is_verified: true,
+            registration_complete: false,
+            data: {
+              registrationToken,
+              verificationId: pending.email,
+            },
+            message: 'OTP verified. Complete registration to create your account.',
+          });
+        }
+      }
+
       await logUserSecurityEvent({
         prisma,
         req,
