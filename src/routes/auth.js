@@ -2718,7 +2718,11 @@ router.get('/approval-status', authenticateToken, async (req, res) => {
         message: 'Selected vendor is not owned by this account',
       });
     }
+    // Admin approval is a supplier trust check. Restaurants are buyers in the
+    // bakery marketplace, so a restaurant profile's storefront status must not
+    // block the owner from using the app or placing bakery orders.
     const requiresApproval = !!(
+      user.role === 'bakery_owner' &&
       vendorStatus &&
       vendorStatus.hasVendor &&
       !vendorStatus.vendorApproved
