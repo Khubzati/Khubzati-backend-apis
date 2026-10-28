@@ -3,7 +3,9 @@ const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const prisma = require('../lib/prisma');
 
 const router = express.Router();
-router.use(authenticateToken, authorizeRole(['customer']));
+// Restaurants buy bakery products through the B2B marketplace, so their
+// authenticated accounts need the same cart operations as customer accounts.
+router.use(authenticateToken, authorizeRole(['customer', 'restaurant_owner']));
 
 const optionIdsFrom = (value) => {
   const raw = value?.selectedModifierOptionIds || value?.optionIds || [];
