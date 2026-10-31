@@ -6,8 +6,68 @@ const {
   isCashOnDelivery,
 } = require('./payments/payment-constants');
 
-const DAILY_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_RECURRING_TIME_ZONE = 'Asia/Amman';
+const DAILY_RUN_HOUR = 2;
 const DEFAULT_BATCH_SIZE = 50;
+
+const zonedDateParts = (date, timeZone) => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    calendar: 'gregory',
+    numberingSystem: 'latn',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  return Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+};
+
+const localTimeToUtc = (year, month, day, hour, timeZone) => {
+  const localAsUtc = Date.UTC(year, month - 1, day, hour, 0, 0);
+  let utcMillis = localAsUtc;
+
+  // Resolve the offset at the target local time, including timezone/DST
+  // changes, without adding a fixed 24 hours.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const instant = new Date(utcMillis);
+    const parts = zonedDateParts(instant, timeZone);
+    const representedAsUtc = Date.UTC(
+      Number(parts.year),
+      Number(parts.month) - 1,
+      Number(parts.day),
+      Number(parts.hour),
+      Number(parts.minute),
+      Number(parts.second),
+    );
+    const offsetMillis = representedAsUtc - utcMillis;
+    const resolvedMillis = localAsUtc - offsetMillis;
+    if (resolvedMillis === utcMillis) break;
+    utcMillis = resolvedMillis;
+  }
+
+  return new Date(utcMillis);
+};
+
+const nextDailyRunAt = (
+  referenceDate = new Date(),
+  timeZone = DEFAULT_RECURRING_TIME_ZONE,
+) => {
+  const local = zonedDateParts(referenceDate, timeZone);
+  const nextLocalDate = new Date(
+    Date.UTC(Number(local.year), Number(local.month) - 1, Number(local.day) + 1),
+  );
+  return localTimeToUtc(
+    nextLocalDate.getUTCFullYear(),
+    nextLocalDate.getUTCMonth() + 1,
+    nextLocalDate.getUTCDate(),
+    DAILY_RUN_HOUR,
+    timeZone,
+  );
+};
 
 const asSafeInt = (value, fallback = 0) => {
   const parsed = Number.parseInt(value, 10);
@@ -35,6 +95,10 @@ class RecurringOrderService {
 
   isDailyRepeat(value) {
     return this.normalizeRepeatMode(value) === 'daily';
+  }
+
+  nextDailyRunAt(referenceDate = new Date()) {
+    return nextDailyRunAt(referenceDate);
   }
 
   buildTemplateSignature({
@@ -118,7 +182,7 @@ class RecurringOrderService {
       items,
     });
 
-    const nextRunAt = new Date(Date.now() + DAILY_INTERVAL_MS);
+    const nextRunAt = this.nextDailyRunAt(new Date());
 
     return this.prisma.recurringOrder.upsert({
       where: { signature },
@@ -189,7 +253,7 @@ class RecurringOrderService {
           data: {
             lastError: String(error?.message || 'Unknown recurring renewal error').slice(0, 1000),
             lastRunAt: now,
-            nextRunAt: new Date(now.getTime() + DAILY_INTERVAL_MS),
+            nextRunAt: this.nextDailyRunAt(now),
           },
         });
       }
@@ -322,7 +386,7 @@ class RecurringOrderService {
           lastRunAt: now,
           lastOrderId: order.id,
           lastError: null,
-          nextRunAt: new Date(now.getTime() + DAILY_INTERVAL_MS),
+          nextRunAt: this.nextDailyRunAt(now),
         },
       });
     });
@@ -331,5 +395,6 @@ class RecurringOrderService {
 
 module.exports = {
   RecurringOrderService,
+  nextDailyRunAt,
 };
 

@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "prisma generate && next build",
     "postinstall": "prisma generate",
-    "start": "node ./src/app.js",
+    "start": "npx prisma migrate deploy && node ./src/app.js",
     "start:kpi-worker": "node ./src/workers/kpi-worker.js",
     "start:kpi-worker:dev": "nodemon ./src/workers/kpi-worker.js --watch src",
     "cleanup:onboarding-uploads": "node scripts/cleanup-onboarding-uploads.js",
