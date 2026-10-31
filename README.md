@@ -331,7 +331,7 @@ To enable automatic daily renewal, create order with:
 
 Notes:
 - Daily recurring currently supports COD only.
-- Backend stores a recurring template and generates the same order automatically every 24h.
+- After the first checkout, the backend stores a recurring template and places the next order at 02:00 Asia/Amman on the following day, then at 02:00 each day.
 - Inventory is revalidated on each renewal; if stock is insufficient, renewal is skipped and logged.
 - Renewal worker is controlled by `ENABLE_RECURRING_ORDER_WORKER=true`.
 

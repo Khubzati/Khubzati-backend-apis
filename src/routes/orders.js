@@ -1155,7 +1155,7 @@ router.patch('/recurring/:id', authenticateToken, async (req, res) => {
         isActive,
         nextRunAt: isActive
           ? (recurringOrder.nextRunAt < new Date()
-              ? new Date(Date.now() + 60 * 1000)
+              ? recurringOrderService.nextDailyRunAt(new Date())
               : recurringOrder.nextRunAt)
           : recurringOrder.nextRunAt,
       },
