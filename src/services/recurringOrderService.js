@@ -416,6 +416,7 @@ class RecurringOrderService {
           orderNumber: order.orderNumber,
           status: order.status,
           audience: 'customer',
+          vendorType: template.bakeryId ? 'bakery' : 'restaurant',
           recurring: 'daily',
         },
       });

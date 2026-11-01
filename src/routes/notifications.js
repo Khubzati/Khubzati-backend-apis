@@ -36,11 +36,56 @@ router.get('/', authenticateToken, async (req, res) => {
       }),
       prisma.notification.count({ where: whereClause })
     ]);
+
+    // The notification table stores only a relatedId, so enrich order
+    // notifications at read time with the order audience/vendor context. This
+    // lets the app distinguish a restaurant owner buying from a bakery from a
+    // restaurant owner managing orders for their own restaurant.
+    const orderNotificationIds = Array.from(new Set(
+      notifications
+        .filter((notification) => notification.type === 'order' && notification.relatedId)
+        .map((notification) => notification.relatedId)
+    ));
+    const orders = orderNotificationIds.length
+      ? await prisma.order.findMany({
+          where: { id: { in: orderNotificationIds } },
+          select: {
+            id: true,
+            userId: true,
+            bakeryId: true,
+            restaurantId: true,
+            bakery: { select: { ownerId: true } },
+            restaurant: { select: { ownerId: true } },
+          },
+        })
+      : [];
+    const orderById = new Map(orders.map((order) => [order.id, order]));
+    const enrichedNotifications = notifications.map((notification) => {
+      if (notification.type !== 'order' || !notification.relatedId) {
+        return notification;
+      }
+      const order = orderById.get(notification.relatedId);
+      if (!order) return notification;
+
+      const isCustomer = order.userId === req.user.id;
+      const isVendor = [order.bakery?.ownerId, order.restaurant?.ownerId]
+        .filter(Boolean)
+        .includes(req.user.id);
+      return {
+        ...notification,
+        data: {
+          event: 'order_notification',
+          orderId: order.id,
+          audience: isCustomer ? 'customer' : isVendor ? 'vendor' : 'unknown',
+          vendorType: order.bakeryId ? 'bakery' : order.restaurantId ? 'restaurant' : '',
+        },
+      };
+    });
     
     return res.status(200).json({
       status: 'success',
       data: {
-        notifications,
+        notifications: enrichedNotifications,
         pagination: {
           total: totalCount,
           page: parseInt(page),
