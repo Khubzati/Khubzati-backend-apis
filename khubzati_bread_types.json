@@ -1,0 +1,571 @@
+[
+  {
+    "key": "khubz_arabi",
+    "englishName": "Arabic Pita Bread",
+    "arabicName": "خبز عربي",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1s5AR-6NIKsA6FFtYJy1j0IS6sryPGMm9",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Soft round pocket bread popular across Jordan and the Levant.",
+    "tags": [
+      "flatbread",
+      "traditional",
+      "pocket"
+    ],
+    "sortOrder": 10,
+    "isActive": true,
+    "imageFileName": "khubz_arabi.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1s5AR-6NIKsA6FFtYJy1j0IS6sryPGMm9/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "khubz_shrak",
+    "englishName": "Shrak Bread",
+    "arabicName": "خبز شراك",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1Zl6xcn4DImkS-bVj7ufAAgGFzREG9mmi",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Very thin Jordanian bread traditionally cooked on a domed griddle.",
+    "tags": [
+      "flatbread",
+      "jordanian",
+      "saj"
+    ],
+    "sortOrder": 20,
+    "isActive": true,
+    "imageFileName": "khubz_shrak.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1Zl6xcn4DImkS-bVj7ufAAgGFzREG9mmi/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "khubz_taboon",
+    "englishName": "Taboon Bread",
+    "arabicName": "خبز طابون",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1RtiNcBJfzSb4KYcScpBf1RpBL9nykrqJ",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Rustic Palestinian flatbread traditionally baked in a clay oven.",
+    "tags": [
+      "flatbread",
+      "palestinian",
+      "oven"
+    ],
+    "sortOrder": 30,
+    "isActive": true,
+    "imageFileName": "khubz_taboon.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1RtiNcBJfzSb4KYcScpBf1RpBL9nykrqJ/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "khubz_saj",
+    "englishName": "Saj Bread",
+    "arabicName": "خبز صاج",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1D5hrCnWetrTYFIzv9-7UEIF_NqOyxvaJ",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Thin flexible flatbread cooked on a convex metal griddle.",
+    "tags": [
+      "flatbread",
+      "saj",
+      "wrap"
+    ],
+    "sortOrder": 40,
+    "isActive": true,
+    "imageFileName": "khubz_saj.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1D5hrCnWetrTYFIzv9-7UEIF_NqOyxvaJ/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "khubz_tannour",
+    "englishName": "Tannour Bread",
+    "arabicName": "خبز تنور",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1HClftmrMn1IgboJwPQ_zbXh3AbqYTtQh",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Bread baked against the heated interior of a traditional oven.",
+    "tags": [
+      "flatbread",
+      "oven",
+      "traditional"
+    ],
+    "sortOrder": 50,
+    "isActive": true,
+    "imageFileName": "khubz_tannour.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1HClftmrMn1IgboJwPQ_zbXh3AbqYTtQh/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "kaak_quds",
+    "englishName": "Jerusalem Kaak",
+    "arabicName": "كعك القدس",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=122YWhAx4BfaJHyoJywgalB2eCBtW09PC",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Sesame-topped street bread associated with Jerusalem.",
+    "tags": [
+      "sesame",
+      "street_food",
+      "levantine"
+    ],
+    "sortOrder": 60,
+    "isActive": true,
+    "imageFileName": "kaak_quds.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/122YWhAx4BfaJHyoJywgalB2eCBtW09PC/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "khubz_hamam",
+    "englishName": "Hamam Bread Rolls",
+    "arabicName": "خبز حمام",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1FdUDAbObYl3ogtk4vgz63rsl9IZ7dfcx",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Small soft rolls used for sandwiches and snacks.",
+    "tags": [
+      "roll",
+      "sandwich",
+      "soft"
+    ],
+    "sortOrder": 70,
+    "isActive": true,
+    "imageFileName": "khubz_hamam.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1FdUDAbObYl3ogtk4vgz63rsl9IZ7dfcx/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "khubz_samoon",
+    "englishName": "Samoon Bread",
+    "arabicName": "خبز صمون",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1qPJJRLPxoA8Jh5sNcUTcLYLM13cWTC-8",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Iraqi-style bread roll commonly used for sandwiches.",
+    "tags": [
+      "roll",
+      "iraqi",
+      "sandwich"
+    ],
+    "sortOrder": 80,
+    "isActive": true,
+    "imageFileName": "khubz_samoon.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1qPJJRLPxoA8Jh5sNcUTcLYLM13cWTC-8/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "khubz_franki",
+    "englishName": "French-Style Bread",
+    "arabicName": "خبز فرنجي",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1JIilZB_--1yAfrYssUhS4Efq6iaVUJlz",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Crusty white bread used for sandwiches.",
+    "tags": [
+      "white_bread",
+      "french",
+      "sandwich"
+    ],
+    "sortOrder": 90,
+    "isActive": true,
+    "imageFileName": "khubz_franki.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1JIilZB_--1yAfrYssUhS4Efq6iaVUJlz/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "khubz_baladi",
+    "englishName": "Baladi Bread",
+    "arabicName": "خبز بلدي",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1bYnQssBXafQdDDoYbAiVPEKfmshTNUOu",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Rustic Egyptian-style round flatbread often made with whole wheat.",
+    "tags": [
+      "flatbread",
+      "egyptian",
+      "wheat"
+    ],
+    "sortOrder": 100,
+    "isActive": true,
+    "imageFileName": "khubz_baladi.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1bYnQssBXafQdDDoYbAiVPEKfmshTNUOu/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "khubz_mashrouh",
+    "englishName": "Mashrouh Bread",
+    "arabicName": "خبز مشروح",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1vU1QzhpdL94kiT8SatSKLcNPtrf385PH",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Large thin Levantine bread suitable for wraps.",
+    "tags": [
+      "flatbread",
+      "levantine",
+      "wrap"
+    ],
+    "sortOrder": 110,
+    "isActive": true,
+    "imageFileName": "khubz_mashrouh.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1vU1QzhpdL94kiT8SatSKLcNPtrf385PH/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "khubz_markook",
+    "englishName": "Markook Bread",
+    "arabicName": "خبز مرقوق",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1M5-0T8euY2LTI9bxxYr1oisur1wkwg1y",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Paper-thin flatbread traditionally baked on a saj.",
+    "tags": [
+      "flatbread",
+      "thin",
+      "traditional"
+    ],
+    "sortOrder": 120,
+    "isActive": true,
+    "imageFileName": "khubz_markook.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1M5-0T8euY2LTI9bxxYr1oisur1wkwg1y/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "manakish",
+    "englishName": "Manakish",
+    "arabicName": "مناقيش",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1gW1YwlAS7ADnqhL8vMDk79u6KVp1GBzk",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Levantine topped flatbread commonly made with zaatar or cheese.",
+    "tags": [
+      "flatbread",
+      "levantine",
+      "breakfast"
+    ],
+    "sortOrder": 130,
+    "isActive": true,
+    "imageFileName": "manakish.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1gW1YwlAS7ADnqhL8vMDk79u6KVp1GBzk/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "khubz_asmar",
+    "englishName": "Brown Bread",
+    "arabicName": "خبز أسمر",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1yP_sCPAw7_ePoCEwMX5g7nGscqST2zvX",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Brown wheat bread offered as an alternative to white bread.",
+    "tags": [
+      "wheat",
+      "brown_bread"
+    ],
+    "sortOrder": 140,
+    "isActive": true,
+    "imageFileName": "khubz_asmar.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1yP_sCPAw7_ePoCEwMX5g7nGscqST2zvX/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "khubz_nakhalah",
+    "englishName": "Bran Bread",
+    "arabicName": "خبز نخالة",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1SAWqaxsQsUtu2xUVFUkBTgoYvbkxF64P",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Bread containing wheat bran for a hearty texture.",
+    "tags": [
+      "bran",
+      "wheat",
+      "fiber"
+    ],
+    "sortOrder": 150,
+    "isActive": true,
+    "imageFileName": "khubz_nakhalah.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1SAWqaxsQsUtu2xUVFUkBTgoYvbkxF64P/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "khubz_shaeer",
+    "englishName": "Barley Bread",
+    "arabicName": "خبز شعير",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1FwsWtgoln0iTRT7VA0V46YfdYJwatxZi",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Rustic loaf containing barley flour, often mixed with wheat.",
+    "tags": [
+      "barley",
+      "rustic",
+      "loaf"
+    ],
+    "sortOrder": 160,
+    "isActive": true,
+    "imageFileName": "khubz_shaeer.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1FwsWtgoln0iTRT7VA0V46YfdYJwatxZi/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "khubz_shofan",
+    "englishName": "Oat Bread",
+    "arabicName": "خبز شوفان",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1LclDiUq2MDdyxvJ-gTCJSgF6QVnf7dOB",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Hearty bread prepared with oats or oat flour.",
+    "tags": [
+      "oat",
+      "loaf",
+      "grains"
+    ],
+    "sortOrder": 170,
+    "isActive": true,
+    "imageFileName": "khubz_shofan.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1LclDiUq2MDdyxvJ-gTCJSgF6QVnf7dOB/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "khubz_multigrain",
+    "englishName": "Multigrain Bread",
+    "arabicName": "خبز متعدد الحبوب",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1IgrrFSQNt4C-sPMkxkEoAcGNM_wzm1iS",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Bread made with a combination of grains and seeds.",
+    "tags": [
+      "multigrain",
+      "loaf",
+      "seeds"
+    ],
+    "sortOrder": 180,
+    "isActive": true,
+    "imageFileName": "khubz_multigrain.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1IgrrFSQNt4C-sPMkxkEoAcGNM_wzm1iS/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "toast_white",
+    "englishName": "White Toast Bread",
+    "arabicName": "توست أبيض",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=13w44velZSqWdJpbo62nJFNqoEnxSbswP",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Soft sliced white bread for sandwiches and toast.",
+    "tags": [
+      "toast",
+      "sandwich",
+      "white_bread"
+    ],
+    "sortOrder": 190,
+    "isActive": true,
+    "imageFileName": "toast_white.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/13w44velZSqWdJpbo62nJFNqoEnxSbswP/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "toast_brown",
+    "englishName": "Brown Toast Bread",
+    "arabicName": "توست أسمر",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=167vdVwJQS6_eATyvlmJ9zZDHkgphw2Vn",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Sliced brown bread commonly served toasted.",
+    "tags": [
+      "toast",
+      "brown_bread",
+      "sandwich"
+    ],
+    "sortOrder": 200,
+    "isActive": true,
+    "imageFileName": "toast_brown.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/167vdVwJQS6_eATyvlmJ9zZDHkgphw2Vn/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "baguette",
+    "englishName": "French Baguette",
+    "arabicName": "باغيت فرنسي",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1_Bb7yElD6R11zKq3muCl7Aoki0boL0qP",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Long French loaf with a crisp crust and airy interior.",
+    "tags": [
+      "french",
+      "crusty",
+      "loaf"
+    ],
+    "sortOrder": 210,
+    "isActive": true,
+    "imageFileName": "baguette.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1_Bb7yElD6R11zKq3muCl7Aoki0boL0qP/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "croissant",
+    "englishName": "Butter Croissant",
+    "arabicName": "كرواسون زبدة",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1wLsF5nNT8pg2cIxWIam1LSxoq6NnjvZB",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Flaky crescent-shaped laminated pastry made with butter.",
+    "tags": [
+      "pastry",
+      "french",
+      "breakfast"
+    ],
+    "sortOrder": 220,
+    "isActive": true,
+    "imageFileName": "croissant.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1wLsF5nNT8pg2cIxWIam1LSxoq6NnjvZB/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "sourdough",
+    "englishName": "Sourdough Bread",
+    "arabicName": "خبز العجين المخمر",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1iAvGbR6LIxnpY6DgYR2MBiGktTeKH47K",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Naturally fermented bread with a tangy flavor and chewy crust.",
+    "tags": [
+      "sourdough",
+      "artisan",
+      "loaf"
+    ],
+    "sortOrder": 230,
+    "isActive": true,
+    "imageFileName": "sourdough.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1iAvGbR6LIxnpY6DgYR2MBiGktTeKH47K/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "ciabatta",
+    "englishName": "Ciabatta",
+    "arabicName": "تشاباتا",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1FJ3UJyoIYcCXNY0NFkSK6l-PT59EWyrp",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Italian bread with an open crumb and lightly crisp crust.",
+    "tags": [
+      "italian",
+      "artisan",
+      "sandwich"
+    ],
+    "sortOrder": 240,
+    "isActive": true,
+    "imageFileName": "ciabatta.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1FJ3UJyoIYcCXNY0NFkSK6l-PT59EWyrp/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "focaccia",
+    "englishName": "Focaccia",
+    "arabicName": "فوكاتشيا",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1iSJzr7eDUUhk_aqCySk8zd1jlObJXip_",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Soft Italian flatbread commonly topped with olive oil and herbs.",
+    "tags": [
+      "italian",
+      "flatbread",
+      "olive_oil"
+    ],
+    "sortOrder": 250,
+    "isActive": true,
+    "imageFileName": "focaccia.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1iSJzr7eDUUhk_aqCySk8zd1jlObJXip_/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "bagel",
+    "englishName": "Bagel",
+    "arabicName": "بيغل",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1mpcdt5-ZdCTqUEMtMgqWUrfCjzXfygv7",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Ring-shaped boiled and baked bread with a chewy texture.",
+    "tags": [
+      "ring",
+      "breakfast",
+      "sandwich"
+    ],
+    "sortOrder": 260,
+    "isActive": true,
+    "imageFileName": "bagel.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1mpcdt5-ZdCTqUEMtMgqWUrfCjzXfygv7/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "brioche",
+    "englishName": "Brioche",
+    "arabicName": "بريوش",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=10LIeSFly0kc9CDCQvLGkyNmMDlUytTgq",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Rich soft bread made with eggs and butter.",
+    "tags": [
+      "enriched",
+      "sweet",
+      "soft"
+    ],
+    "sortOrder": 270,
+    "isActive": true,
+    "imageFileName": "brioche.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/10LIeSFly0kc9CDCQvLGkyNmMDlUytTgq/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "rye_bread",
+    "englishName": "Rye Bread",
+    "arabicName": "خبز الجاودار",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1IFBDxm-OcWE42GSqO7_AdlaDOmPd7c8u",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Dense flavorful bread made with rye flour.",
+    "tags": [
+      "rye",
+      "loaf",
+      "hearty"
+    ],
+    "sortOrder": 280,
+    "isActive": true,
+    "imageFileName": "rye_bread.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1IFBDxm-OcWE42GSqO7_AdlaDOmPd7c8u/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "bread_roll",
+    "englishName": "Bread Roll",
+    "arabicName": "خبز رول",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1yIv4mBTVuu0sIeu26IjygVtfbQYJUgBw",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Individual soft bread roll used for sandwiches or as a side.",
+    "tags": [
+      "roll",
+      "sandwich",
+      "soft"
+    ],
+    "sortOrder": 290,
+    "isActive": true,
+    "imageFileName": "bread_roll.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1yIv4mBTVuu0sIeu26IjygVtfbQYJUgBw/view",
+    "imageStatus": "review"
+  },
+  {
+    "key": "garlic_bread",
+    "englishName": "Garlic Bread",
+    "arabicName": "خبز بالثوم",
+    "imageUrl": "https://drive.google.com/uc?export=view&id=1lf3kc_mLfcDS0-zTpwyVKorphpClnfe0",
+    "imageSource": "Khubzati Google Drive - Complete 30 Review",
+    "imageCredit": "AI-generated draft; review before production",
+    "description": "Bread flavored with garlic and often butter or olive oil.",
+    "tags": [
+      "garlic",
+      "side",
+      "toasted"
+    ],
+    "sortOrder": 300,
+    "isActive": true,
+    "imageFileName": "garlic_bread.webp",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1lf3kc_mLfcDS0-zTpwyVKorphpClnfe0/view",
+    "imageStatus": "review"
+  }
+]
