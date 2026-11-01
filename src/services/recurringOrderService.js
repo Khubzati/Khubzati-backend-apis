@@ -5,6 +5,7 @@ const {
   normalizePaymentMethod,
   isCashOnDelivery,
 } = require('./payments/payment-constants');
+const { notifyUser, notifyUsers } = require('./notificationDispatchService');
 
 const DEFAULT_RECURRING_TIME_ZONE = 'Asia/Amman';
 const DAILY_RUN_HOUR = 2;
@@ -281,7 +282,7 @@ class RecurringOrderService {
       );
     }
 
-    await this.prisma.$transaction(async (tx) => {
+    const createdOrder = await this.prisma.$transaction(async (tx) => {
       const products = await tx.product.findMany({
         where: {
           id: { in: productIds },
@@ -389,7 +390,81 @@ class RecurringOrderService {
           nextRunAt: this.nextDailyRunAt(now),
         },
       });
+
+      return order;
     });
+
+    // Notify outside the transaction so a push/FCM hiccup never rolls back a
+    // successfully created order or marks the renewal as failed.
+    await this._notifyRecurringOrderCreated(createdOrder, template);
+  }
+
+  async _notifyRecurringOrderCreated(order, template) {
+    if (!order) return;
+    try {
+      await notifyUser({
+        prisma: this.prisma,
+        userId: template.userId,
+        title: 'Daily Order Placed',
+        message: `Your daily order #${order.orderNumber} has been placed.`,
+        type: 'order',
+        relatedId: order.id,
+        createdBy: 'system',
+        data: {
+          event: 'order_placed',
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          status: order.status,
+          audience: 'customer',
+          recurring: 'daily',
+        },
+      });
+
+      const [bakery, restaurant] = await Promise.all([
+        template.bakeryId
+          ? this.prisma.bakery.findUnique({
+              where: { id: template.bakeryId },
+              select: { ownerId: true, name: true },
+            })
+          : null,
+        template.restaurantId
+          ? this.prisma.restaurant.findUnique({
+              where: { id: template.restaurantId },
+              select: { ownerId: true, name: true },
+            })
+          : null,
+      ]);
+
+      const vendorUserIds = [bakery?.ownerId, restaurant?.ownerId].filter(
+        (id) => id && id !== template.userId
+      );
+      if (vendorUserIds.length) {
+        const vendorName = bakery?.name || restaurant?.name || 'your shop';
+        await notifyUsers({
+          prisma: this.prisma,
+          userIds: vendorUserIds,
+          title: 'New Order Received',
+          message: `You have a new daily order #${order.orderNumber} for ${vendorName}.`,
+          type: 'order',
+          relatedId: order.id,
+          createdBy: 'system',
+          data: {
+            event: 'new_order_received',
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            status: order.status,
+            audience: 'vendor',
+            vendorType: template.bakeryId ? 'bakery' : 'restaurant',
+            recurring: 'daily',
+          },
+        });
+      }
+    } catch (error) {
+      console.error(
+        `❌ Failed to send recurring order notifications for order ${order?.id}:`,
+        error.message
+      );
+    }
   }
 }
 

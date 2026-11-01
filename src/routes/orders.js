@@ -1751,8 +1751,37 @@ router.put('/:orderId/status', authenticateToken, async (req, res) => {
         orderId: order.id,
         orderNumber: order.orderNumber,
         status: resolvedStatus,
+        audience: 'customer',
       },
     });
+
+    // Also notify the vendor owner(s) about the status change (e.g. a customer
+    // self-cancel, an admin action, or a driver update) — excluding whoever
+    // triggered this update so owners never get pinged for their own changes.
+    const statusVendorUserIds = [
+      order.bakery?.ownerId,
+      order.restaurant?.ownerId,
+    ].filter((value) => value && value !== req.user.id);
+
+    if (statusVendorUserIds.length) {
+      await notifyUsers({
+        prisma,
+        userIds: statusVendorUserIds,
+        title: notificationTitle,
+        message: `Order #${order.orderNumber} is now ${resolvedStatus.replace(/_/g, ' ')}.`,
+        type: 'order',
+        relatedId: order.id,
+        createdBy: 'system',
+        data: {
+          event: 'order_status_updated',
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          status: resolvedStatus,
+          audience: 'vendor',
+          vendorType: order.bakeryId ? 'bakery' : 'restaurant',
+        },
+      });
+    }
 
     if (resolvedStatus === 'completed') {
       try {
@@ -1810,16 +1839,20 @@ router.post('/:orderId/cancel', authenticateToken, async (req, res) => {
         id: orderId,
         userId: req.user.id,
         deletedAt: null
-      }
+      },
+      include: {
+        bakery: { select: { ownerId: true, name: true } },
+        restaurant: { select: { ownerId: true, name: true } },
+      },
     });
-    
+
     if (!order) {
       return res.status(404).json({
         status: 'fail',
         message: 'Order not found'
       });
     }
-    
+
     // Check if order can be cancelled
     if (!['pending', 'confirmed'].includes(order.status)) {
       return res.status(400).json({
@@ -1902,9 +1935,36 @@ router.post('/:orderId/cancel', authenticateToken, async (req, res) => {
         event: 'order_cancelled',
         orderId: order.id,
         orderNumber: order.orderNumber,
+        audience: 'customer',
       },
     });
-    
+
+    // Let the vendor owner know the customer cancelled their order.
+    const cancelVendorUserIds = [
+      order.bakery?.ownerId,
+      order.restaurant?.ownerId,
+    ].filter((value) => value && value !== req.user.id);
+
+    if (cancelVendorUserIds.length) {
+      await notifyUsers({
+        prisma,
+        userIds: cancelVendorUserIds,
+        title: 'Order Cancelled',
+        message: `Order #${order.orderNumber} was cancelled by the customer.`,
+        type: 'order',
+        relatedId: order.id,
+        createdBy: 'system',
+        data: {
+          event: 'order_cancelled',
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          status: 'cancelled',
+          audience: 'vendor',
+          vendorType: order.bakeryId ? 'bakery' : 'restaurant',
+        },
+      });
+    }
+
     return res.status(200).json({
       status: 'success',
       data: {

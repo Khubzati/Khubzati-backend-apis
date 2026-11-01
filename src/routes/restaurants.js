@@ -5,6 +5,7 @@ const path = require('path');
 const prisma = require('../lib/prisma');
 const { authenticateToken, authorizeRole } = require('../middleware/auth');
 const { resolveOrderStatus } = require('../utils/order-status');
+const { notifyUser, notifyUsers } = require('../services/notificationDispatchService');
 
 const router = express.Router();
 const { consumeOnboardingUploads } = require('../services/onboardingUploadService');
@@ -2195,6 +2196,60 @@ router.put('/orders/:orderId/status', authenticateToken, authorizeRole(['restaur
 
       return nextOrder;
     });
+
+    // Notify the buyer and (when the actor is not the owner, e.g. an admin
+    // acting on the restaurant's behalf) the restaurant owner about the change.
+    const statusMessages = {
+      confirmed: 'has been confirmed',
+      preparing: 'is now being prepared',
+      ready_for_pickup: 'is ready for pickup',
+      out_for_delivery: 'is out for delivery',
+      delivered: 'has been delivered',
+      completed: 'has been completed',
+      cancelled: 'has been cancelled',
+    };
+    const statusPhrase =
+      statusMessages[status] || `is now ${String(status).replace(/_/g, ' ')}`;
+
+    await notifyUser({
+      prisma,
+      userId: order.userId,
+      title: 'Order Status Updated',
+      message: `Your order #${order.orderNumber} ${statusPhrase}.`,
+      type: 'order',
+      relatedId: order.id,
+      createdBy: 'system',
+      data: {
+        event: 'order_status_updated',
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        status,
+        audience: 'customer',
+      },
+    });
+
+    const restaurantOwnerRecipients = [restaurant.ownerId].filter(
+      (id) => id && id !== req.user.id
+    );
+    if (restaurantOwnerRecipients.length) {
+      await notifyUsers({
+        prisma,
+        userIds: restaurantOwnerRecipients,
+        title: 'Order Status Updated',
+        message: `Order #${order.orderNumber} ${statusPhrase}.`,
+        type: 'order',
+        relatedId: order.id,
+        createdBy: 'system',
+        data: {
+          event: 'order_status_updated',
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          status,
+          audience: 'vendor',
+          vendorType: 'restaurant',
+        },
+      });
+    }
 
     return res.status(200).json({
       status: 'success',
