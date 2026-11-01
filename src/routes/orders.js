@@ -739,6 +739,8 @@ const createOrderHandler = async (req, res) => {
         event: 'order_placed',
         orderId: order.id,
         orderNumber,
+        audience: 'customer',
+        vendorType: order.bakeryId ? 'bakery' : order.restaurantId ? 'restaurant' : '',
       },
     });
 
@@ -763,6 +765,8 @@ const createOrderHandler = async (req, res) => {
           event: 'new_order_received',
           orderId: order.id,
           orderNumber,
+          audience: 'vendor',
+          vendorType: order.bakeryId ? 'bakery' : order.restaurantId ? 'restaurant' : '',
         },
       });
     }
@@ -1752,6 +1756,7 @@ router.put('/:orderId/status', authenticateToken, async (req, res) => {
         orderNumber: order.orderNumber,
         status: resolvedStatus,
         audience: 'customer',
+        vendorType: order.bakeryId ? 'bakery' : order.restaurantId ? 'restaurant' : '',
       },
     });
 
@@ -1936,6 +1941,7 @@ router.post('/:orderId/cancel', authenticateToken, async (req, res) => {
         orderId: order.id,
         orderNumber: order.orderNumber,
         audience: 'customer',
+        vendorType: order.bakeryId ? 'bakery' : order.restaurantId ? 'restaurant' : '',
       },
     });
 
