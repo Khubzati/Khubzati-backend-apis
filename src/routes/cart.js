@@ -10,8 +10,11 @@ const optionIdsFrom = (value) => {
   return [...new Set(Array.isArray(raw) ? raw.map(String).filter(Boolean) : [])].sort();
 };
 
-const configurationKey = (productId, optionIds) =>
-  `${productId}:${[...optionIds].sort().join(',')}`;
+const normalizeCartOrderType = (value) =>
+  String(value || '').trim().toLowerCase() === 'daily' ? 'daily' : 'one_time';
+
+const configurationKey = (productId, optionIds, orderType = 'one_time') =>
+  `${productId}:${[...optionIds].sort().join(',')}:${normalizeCartOrderType(orderType)}`;
 
 const advisoryLockId = (value) => {
   let hash = 0;
@@ -110,7 +113,15 @@ const serializeCart = async (userId) => {
       },
     },
   });
-  return cart || { id: null, userId, totalAmount: 0, cartItems: [] };
+  if (!cart) return { id: null, userId, totalAmount: 0, cartItems: [] };
+
+  return {
+    ...cart,
+    cartItems: cart.cartItems.map((item) => ({
+      ...item,
+      orderType: normalizeCartOrderType(item.selectedModifiers?.orderType),
+    })),
+  };
 };
 
 const recalculateCart = async (cartId) => {
@@ -131,6 +142,7 @@ router.post('/items', async (req, res) => {
   try {
     const productId = String(req.body?.productId || '');
     const quantity = Number(req.body?.quantity || 1);
+    const orderType = normalizeCartOrderType(req.body?.orderType);
     if (!productId || !Number.isInteger(quantity) || quantity < 1) {
       return res.status(400).json({ status: 'fail', message: 'Valid productId and quantity are required' });
     }
@@ -159,12 +171,17 @@ router.post('/items', async (req, res) => {
         throw Object.assign(new Error('Cart can only contain products from one vendor'), { statusCode: 409 });
       }
 
-      const key = configurationKey(productId, resolved.optionIds);
+      const key = configurationKey(productId, resolved.optionIds, orderType);
       const existing = activeItems.find((item) =>
-        configurationKey(item.productId, optionIdsFrom(item.selectedModifiers)) === key);
+        configurationKey(
+          item.productId,
+          optionIdsFrom(item.selectedModifiers),
+          item.selectedModifiers?.orderType,
+        ) === key);
       const selectedModifiers = {
         selectedModifierOptionIds: resolved.optionIds,
         groups: resolved.selectedGroups,
+        orderType,
       };
       if (existing) {
         const nextQuantity = existing.quantity + quantity;
@@ -238,6 +255,7 @@ router.put('/items/:itemId', async (req, res) => {
         selectedModifiers: {
           selectedModifierOptionIds: resolved.optionIds,
           groups: resolved.selectedGroups,
+          orderType: normalizeCartOrderType(item.selectedModifiers?.orderType),
         },
         specialInstructions: req.body?.specialInstructions ?? item.specialInstructions,
         updatedBy: req.user.id,
