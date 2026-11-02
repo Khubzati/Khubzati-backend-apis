@@ -2449,13 +2449,20 @@ router.put('/vendors/:id/reject', async (req, res) => {
 // Orders Management
 router.get('/orders', async (req, res) => {
     try {
-        const { status, payment_status, bakery_id, restaurant_id, user_id, search, page = 1, limit = 20 } = req.query;
+        const { status, payment_status, bakery_id, restaurant_id, user_id, search, date_from, date_to, page = 1, limit = 20 } = req.query;
+        const parsedPage = Math.max(1, Number.parseInt(page, 10) || 1);
+        const parsedLimit = Math.min(100, Math.max(1, Number.parseInt(limit, 10) || 20));
 
         const whereClause = {
             deletedAt: null
         };
 
-        if (status) {
+        if (status === 'issues') {
+            whereClause.OR = [
+                { status: 'cancelled' },
+                { paymentStatus: 'failed' },
+            ];
+        } else if (status) {
             const resolvedStatus = resolveOrderStatus(status);
             if (!resolvedStatus) {
                 return res.status(400).json({
@@ -2470,13 +2477,37 @@ router.get('/orders', async (req, res) => {
         if (restaurant_id) whereClause.restaurantId = restaurant_id;
         if (user_id) whereClause.userId = user_id;
 
-        const skip = (parseInt(page) - 1) * parseInt(limit);
+        if (search && String(search).trim()) {
+            const term = String(search).trim();
+            const searchConditions = [
+                { orderNumber: { contains: term, mode: 'insensitive' } },
+                { user: { fullName: { contains: term, mode: 'insensitive' } } },
+                { user: { email: { contains: term, mode: 'insensitive' } } },
+                { user: { phoneNumber: { contains: term, mode: 'insensitive' } } },
+                { bakery: { name: { contains: term, mode: 'insensitive' } } },
+                { restaurant: { name: { contains: term, mode: 'insensitive' } } },
+            ];
+            if (whereClause.OR) {
+                whereClause.AND = [{ OR: whereClause.OR }, { OR: searchConditions }];
+                delete whereClause.OR;
+            } else {
+                whereClause.OR = searchConditions;
+            }
+        }
+
+        if (date_from || date_to) {
+            whereClause.createdAt = {};
+            if (date_from && !Number.isNaN(Date.parse(date_from))) whereClause.createdAt.gte = new Date(date_from);
+            if (date_to && !Number.isNaN(Date.parse(date_to))) whereClause.createdAt.lte = new Date(date_to);
+        }
+
+        const skip = (parsedPage - 1) * parsedLimit;
 
         const [orders, total] = await Promise.all([
             prisma.order.findMany({
                 where: whereClause,
                 skip,
-                take: parseInt(limit),
+                take: parsedLimit,
                 orderBy: { createdAt: 'desc' },
                 include: {
                     user: {
@@ -2533,9 +2564,9 @@ router.get('/orders', async (req, res) => {
             data: {
                 orders: formattedOrders,
                 total,
-                page: parseInt(page),
-                limit: parseInt(limit),
-                totalPages: Math.ceil(total / parseInt(limit))
+                page: parsedPage,
+                limit: parsedLimit,
+                totalPages: Math.ceil(total / parsedLimit)
             }
         });
     } catch (error) {
