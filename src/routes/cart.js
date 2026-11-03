@@ -186,7 +186,12 @@ router.post('/items', async (req, res) => {
         orderType,
       };
       if (existing) {
-        const nextQuantity = existing.quantity + quantity;
+        // Daily cart items represent the requested amount for each renewal.
+        // Re-adding the same bread therefore replaces its quantity, while
+        // one-time cart additions keep the usual increment behavior.
+        const nextQuantity = orderType === 'daily'
+          ? quantity
+          : existing.quantity + quantity;
         if (nextQuantity > Number(resolved.product.stockQuantity)) {
           throw Object.assign(new Error('Requested quantity exceeds available stock'), { statusCode: 400 });
         }

@@ -109,20 +109,10 @@ class RecurringOrderService {
     deliveryAddressId,
     orderType,
     paymentMethod,
-    items,
   }) {
     const vendorScope = bakeryId
       ? `bakery:${bakeryId}`
       : `restaurant:${restaurantId || ''}`;
-    const compactItems = [...(items || [])]
-      .map((item) => ({
-        productId: String(item.productId || '').trim(),
-        quantity: asSafeInt(item.quantity, 0),
-      }))
-      .filter((item) => item.productId && item.quantity > 0)
-      .sort((a, b) => a.productId.localeCompare(b.productId))
-      .map((item) => `${item.productId}:${item.quantity}`)
-      .join('|');
 
     return [
       userId,
@@ -130,7 +120,6 @@ class RecurringOrderService {
       deliveryAddressId || '',
       orderType || 'delivery',
       normalizePaymentMethod(paymentMethod),
-      compactItems,
     ].join('::');
   }
 
@@ -180,45 +169,69 @@ class RecurringOrderService {
       deliveryAddressId,
       orderType,
       paymentMethod: normalizedPaymentMethod,
-      items,
     });
 
     const nextRunAt = this.nextDailyRunAt(new Date());
+    const templateData = {
+      isActive: true,
+      frequency: 'daily',
+      userId,
+      bakeryId: bakeryId || null,
+      restaurantId: restaurantId || null,
+      orderType: orderType || 'delivery',
+      deliveryAddressId: deliveryAddressId || null,
+      paymentMethod: normalizedPaymentMethod,
+      paymentProvider: PAYMENT_PROVIDERS.COD,
+      specialInstructions: specialInstructions || null,
+      itemsJson: items,
+      sourceOrderId: sourceOrderId || null,
+      nextRunAt,
+      lastError: null,
+    };
+
+    // A user has one daily basket per vendor/address/order type. Re-checkout
+    // updates that basket (including quantities) instead of creating a second
+    // recurring schedule when its product list or quantity changes.
+    const existingTemplates = await this.prisma.recurringOrder.findMany({
+      where: {
+        userId,
+        bakeryId: bakeryId || null,
+        restaurantId: restaurantId || null,
+        deliveryAddressId: deliveryAddressId || null,
+        orderType: orderType || 'delivery',
+        paymentMethod: normalizedPaymentMethod,
+        frequency: 'daily',
+      },
+      orderBy: { updatedAt: 'desc' },
+      select: { id: true, sourceOrderId: true },
+    });
+    if (existingTemplates.length > 0) {
+      const [existingTemplate, ...duplicateTemplates] = existingTemplates;
+      return this.prisma.$transaction(async (tx) => {
+        const updated = await tx.recurringOrder.update({
+          where: { id: existingTemplate.id },
+          data: {
+            ...templateData,
+            sourceOrderId: existingTemplate.sourceOrderId || sourceOrderId || null,
+          },
+        });
+        if (duplicateTemplates.length > 0) {
+          await tx.recurringOrder.updateMany({
+            where: {
+              id: { in: duplicateTemplates.map((template) => template.id) },
+              isActive: true,
+            },
+            data: { isActive: false },
+          });
+        }
+        return updated;
+      });
+    }
 
     return this.prisma.recurringOrder.upsert({
       where: { signature },
-      update: {
-        isActive: true,
-        frequency: 'daily',
-        userId,
-        bakeryId: bakeryId || null,
-        restaurantId: restaurantId || null,
-        orderType: orderType || 'delivery',
-        deliveryAddressId: deliveryAddressId || null,
-        paymentMethod: normalizedPaymentMethod,
-        paymentProvider: PAYMENT_PROVIDERS.COD,
-        specialInstructions: specialInstructions || null,
-        itemsJson: items,
-        sourceOrderId: sourceOrderId || null,
-        nextRunAt,
-        lastError: null,
-      },
-      create: {
-        signature,
-        frequency: 'daily',
-        isActive: true,
-        userId,
-        bakeryId: bakeryId || null,
-        restaurantId: restaurantId || null,
-        orderType: orderType || 'delivery',
-        deliveryAddressId: deliveryAddressId || null,
-        paymentMethod: normalizedPaymentMethod,
-        paymentProvider: PAYMENT_PROVIDERS.COD,
-        specialInstructions: specialInstructions || null,
-        itemsJson: items,
-        sourceOrderId: sourceOrderId || null,
-        nextRunAt,
-      },
+      update: templateData,
+      create: { signature, ...templateData },
     });
   }
 
