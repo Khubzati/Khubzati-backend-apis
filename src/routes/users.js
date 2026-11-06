@@ -1,17 +1,8 @@
 const express = require('express');
-const bcrypt = require('bcryptjs');
 const prisma = require('../lib/prisma');
 const { authenticateToken } = require('../middleware/auth');
-const { createRateLimiter } = require('../middleware/rate-limit');
-const { logUserSecurityEvent } = require('../services/securityEventService');
 
 const router = express.Router();
-const passwordChangeLimiter = createRateLimiter({
-  keyPrefix: 'user:change-password',
-  windowMs: 15 * 60 * 1000,
-  maxRequests: 5,
-  message: 'Too many password change attempts. Please try again later.',
-});
 const allowTestFallbacks = false;
 const VALID_ADDRESS_TYPES = new Set(['home', 'work', 'other']);
 const VALID_FAVORITE_TARGET_TYPES = new Set(['bakery', 'restaurant', 'product']);
@@ -76,109 +67,6 @@ function normalizeFavoriteTargetType(rawType) {
 
   return null;
 }
-
-// Change the authenticated user's password. The same endpoint serves
-// restaurant and bakery owners because both use the shared user account.
-router.post(
-  '/change-password',
-  authenticateToken,
-  passwordChangeLimiter,
-  async (req, res) => {
-    try {
-      const { currentPassword, newPassword } = req.body || {};
-
-      if (typeof currentPassword !== 'string' || !currentPassword ||
-          typeof newPassword !== 'string' || !newPassword) {
-        return res.status(400).json({
-          status: 'fail',
-          code: 'PASSWORD_FIELDS_REQUIRED',
-          message: 'Current password and new password are required.',
-        });
-      }
-
-      if (
-        newPassword.length < 8 ||
-        Buffer.byteLength(newPassword, 'utf8') > 72
-      ) {
-        return res.status(400).json({
-          status: 'fail',
-          code: 'PASSWORD_LENGTH_INVALID',
-          message: 'New password must be at least 8 characters and at most 72 bytes.',
-        });
-      }
-
-      const user = await prisma.user.findUnique({
-        where: { id: req.user.id },
-        select: { id: true, password: true },
-      });
-
-      if (!user) {
-        return res.status(404).json({
-          status: 'fail',
-          code: 'USER_NOT_FOUND',
-          message: 'User not found.',
-        });
-      }
-
-      const currentPasswordMatches = await bcrypt.compare(
-        currentPassword,
-        user.password,
-      );
-      if (!currentPasswordMatches) {
-        await logUserSecurityEvent({
-          prisma,
-          req,
-          userId: user.id,
-          eventType: 'password_change_failed',
-          status: 'current_password_mismatch',
-        });
-        return res.status(400).json({
-          status: 'fail',
-          code: 'INVALID_CURRENT_PASSWORD',
-          message: 'Current password is incorrect.',
-        });
-      }
-
-      if (currentPassword === newPassword) {
-        return res.status(400).json({
-          status: 'fail',
-          code: 'PASSWORD_UNCHANGED',
-          message: 'New password must be different from the current password.',
-        });
-      }
-
-      const passwordHash = await bcrypt.hash(newPassword, 10);
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          password: passwordHash,
-          otp: null,
-          otpExpiry: null,
-          updatedBy: user.id,
-        },
-      });
-
-      await logUserSecurityEvent({
-        prisma,
-        req,
-        userId: user.id,
-        eventType: 'password_change_success',
-        status: 'password_updated',
-      });
-
-      return res.status(200).json({
-        status: 'success',
-        message: 'Password updated successfully.',
-      });
-    } catch (error) {
-      console.error('Change password error:', error);
-      return res.status(500).json({
-        status: 'error',
-        message: 'An error occurred while changing the password.',
-      });
-    }
-  },
-);
 
 async function getFavoriteTargetSummary(targetType, targetId) {
   if (targetType === 'bakery') {
