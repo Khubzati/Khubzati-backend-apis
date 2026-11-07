@@ -21,6 +21,8 @@
     "db:legacy:sequelize:migrate": "npx sequelize-cli db:migrate",
     "db:legacy:sequelize:undo": "npx sequelize-cli db:migrate:undo",
     "create-admin": "node src/scripts/create-admin.js",
+    "seed:bread-types": "node src/scripts/seed-bread-types.js",
+    "seed:demo-inventory": "node src/scripts/seed-demo-inventory.js",
     "test": "NODE_ENV=test jest --runInBand --detectOpenHandles",
     "test:local": "DATABASE_URL=${TEST_DATABASE_URL:-postgresql://khubzati:khubzati@localhost:5544/khubzati_test?schema=public} DIRECT_URL=${TEST_DATABASE_URL:-postgresql://khubzati:khubzati@localhost:5544/khubzati_test?schema=public} NODE_ENV=test jest --runInBand --detectOpenHandles",
     "test:seed": "node scripts/test-setup.js"

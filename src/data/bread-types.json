@@ -1,0 +1,544 @@
+[
+  {
+    "key": "khubz_ali_white",
+    "englishName": "Automatic White Arabic Bread",
+    "arabicName": "خبز آلي أبيض",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/khubz_ali_white.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Soft white Arabic bakery bread.",
+    "tags": [
+      "jordanian",
+      "pita",
+      "white_bread"
+    ],
+    "sortOrder": 10,
+    "isActive": true,
+    "imageFileName": "khubz_ali_white.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1sfpk6ulamdiKGT9p2AQVqq25zD_lj-5O/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "khubz_ali_brown",
+    "englishName": "Automatic Brown Arabic Bread",
+    "arabicName": "خبز آلي أسمر",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/khubz_ali_brown.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Brown Arabic bakery bread.",
+    "tags": [
+      "jordanian",
+      "pita",
+      "brown_bread"
+    ],
+    "sortOrder": 20,
+    "isActive": true,
+    "imageFileName": "khubz_ali_brown.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1WA7gk07kGzeEeniaN__QCdnT9cWxsiLq/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "kamaj_white",
+    "englishName": "White Kamaj Bread",
+    "arabicName": "خبز كماج أبيض",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/kamaj_white.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Traditional white kamaj flatbread.",
+    "tags": [
+      "jordanian",
+      "flatbread"
+    ],
+    "sortOrder": 30,
+    "isActive": true,
+    "imageFileName": "kamaj_white.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/17njEFqulylHfXTIjor26B2eWmX05hPiD/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "kamaj_brown",
+    "englishName": "Brown Kamaj Bread",
+    "arabicName": "خبز كماج أسمر",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/kamaj_brown.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Brown wheat kamaj flatbread.",
+    "tags": [
+      "jordanian",
+      "flatbread",
+      "wheat"
+    ],
+    "sortOrder": 40,
+    "isActive": true,
+    "imageFileName": "kamaj_brown.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/13DB4jQyO_tOgkJRRaTUhRS0XDuMPTrJE/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "arabic_bread_small",
+    "englishName": "Small Arabic Bread",
+    "arabicName": "خبز عربي صغير",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/arabic_bread_small.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Small round Arabic bread.",
+    "tags": [
+      "jordanian",
+      "pita"
+    ],
+    "sortOrder": 50,
+    "isActive": true,
+    "imageFileName": "arabic_bread_small.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1meqZzJXkrMQ8rqGVc3fYqdE7Cn-KmyIr/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "arabic_bread_large",
+    "englishName": "Large Arabic Bread",
+    "arabicName": "خبز عربي كبير",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/arabic_bread_large.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Large round Arabic bread.",
+    "tags": [
+      "jordanian",
+      "pita"
+    ],
+    "sortOrder": 60,
+    "isActive": true,
+    "imageFileName": "arabic_bread_large.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/16PM9gEqhhjU_f8MkK3YuA8mGagzIIBJ1/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "khubz_taboon",
+    "englishName": "Taboon Bread",
+    "arabicName": "خبز طابون",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/khubz_taboon.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Rustic traditional taboon flatbread.",
+    "tags": [
+      "jordanian",
+      "flatbread"
+    ],
+    "sortOrder": 70,
+    "isActive": true,
+    "imageFileName": "taboon.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1CfAihoIZTowFWyimWY7EM1RAw7AtmQ_E/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "khubz_shrak",
+    "englishName": "Shrak Bread",
+    "arabicName": "خبز شراك",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/khubz_shrak.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Very thin bread cooked on a saj.",
+    "tags": [
+      "jordanian",
+      "flatbread"
+    ],
+    "sortOrder": 80,
+    "isActive": true,
+    "imageFileName": "shrak.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/12KNscnyQq7wbaooFGO74md0NcFZ-K8pu/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "khubz_mashrouh",
+    "englishName": "Mashrouh Bread",
+    "arabicName": "خبز مشروح",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/khubz_mashrouh.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Large thin traditional bread.",
+    "tags": [
+      "jordanian",
+      "flatbread"
+    ],
+    "sortOrder": 90,
+    "isActive": true,
+    "imageFileName": "mashrouh.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1-0DiElAILRewB5qYcd7R9Ps3onfosP6C/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "khubz_tannour",
+    "englishName": "Tannour Bread",
+    "arabicName": "خبز تنور",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/khubz_tannour.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Bread baked in a traditional tannour oven.",
+    "tags": [
+      "jordanian",
+      "oven"
+    ],
+    "sortOrder": 100,
+    "isActive": true,
+    "imageFileName": "tannour.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/17wzdeiZ4Liof4jIjtQ7nMS4IB5M6WqnG/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "khubz_saj",
+    "englishName": "Saj Bread",
+    "arabicName": "خبز صاج",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/khubz_saj.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Thin flexible saj flatbread.",
+    "tags": [
+      "jordanian",
+      "flatbread"
+    ],
+    "sortOrder": 110,
+    "isActive": true,
+    "imageFileName": "saj_bread.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1tVqoJh8EwsrfFSvaUO16HC0PEd21ujvM/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "whole_wheat_bread",
+    "englishName": "Whole Wheat Bread",
+    "arabicName": "خبز قمح كامل",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/whole_wheat_bread.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Bread made with whole wheat.",
+    "tags": [
+      "jordanian",
+      "wheat"
+    ],
+    "sortOrder": 120,
+    "isActive": true,
+    "imageFileName": "whole_wheat_bread.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/11j0ti8cQVIkr6Y_EAFC4y3IAm1AONJdl/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "toast_white",
+    "englishName": "White Toast Bread",
+    "arabicName": "توست أبيض",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/toast_white.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Soft white sliced sandwich bread.",
+    "tags": [
+      "toast",
+      "sandwich"
+    ],
+    "sortOrder": 130,
+    "isActive": true,
+    "imageFileName": "white_toast.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/17iYtjjon9024y6Pe4LYwc4IyohQP1hwN/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "toast_brown",
+    "englishName": "Brown Toast Bread",
+    "arabicName": "توست أسمر",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/toast_brown.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Brown sliced sandwich bread.",
+    "tags": [
+      "toast",
+      "sandwich"
+    ],
+    "sortOrder": 140,
+    "isActive": true,
+    "imageFileName": "brown_toast.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/16cQpdvG5kgr3_GQjdO_nwnMWjT7RZfLp/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "multigrain_toast",
+    "englishName": "Multigrain Toast",
+    "arabicName": "توست حبوب",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/multigrain_toast.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Sliced multigrain sandwich bread.",
+    "tags": [
+      "toast",
+      "multigrain"
+    ],
+    "sortOrder": 150,
+    "isActive": true,
+    "imageFileName": "multigrain_toast.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1AScUPh9671d1YvOfI6GWHNJBDgrawZb1/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "milk_toast",
+    "englishName": "Milk Toast Bread",
+    "arabicName": "توست حليب",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/milk_toast.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Soft milk-enriched sliced bread.",
+    "tags": [
+      "toast",
+      "milk"
+    ],
+    "sortOrder": 160,
+    "isActive": true,
+    "imageFileName": "milk_toast.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/10DjSOS_nPwLb2gL21VsNPcgzHe4TZBBw/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "khubz_hamam",
+    "englishName": "Hammam Bread Rolls",
+    "arabicName": "خبز حمام",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/khubz_hamam.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Soft bread rolls for sandwiches.",
+    "tags": [
+      "jordanian",
+      "roll"
+    ],
+    "sortOrder": 170,
+    "isActive": true,
+    "imageFileName": "hammam_bread.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1uIeCwJqdMBKGg9yhvop8vZppOmyJMQ86/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "khubz_samoon",
+    "englishName": "Samoon Bread",
+    "arabicName": "خبز صمون",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/khubz_samoon.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Soft elongated sandwich bread.",
+    "tags": [
+      "roll",
+      "sandwich"
+    ],
+    "sortOrder": 180,
+    "isActive": true,
+    "imageFileName": "samoon_bread.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1URKBXev8nY7mGPXXCCXbKhH1OMGrr1PB/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "fino_bread",
+    "englishName": "Fino Bread",
+    "arabicName": "خبز فينو",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/fino_bread.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Long soft bakery roll.",
+    "tags": [
+      "roll",
+      "sandwich"
+    ],
+    "sortOrder": 190,
+    "isActive": true,
+    "imageFileName": "fino_bread.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1n7qfetvvzSa61Bj6eOOCb0YkjoIEs-LC/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "sesame_burger_bun",
+    "englishName": "Sesame Burger Bun",
+    "arabicName": "خبز برغر بالسمسم",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/sesame_burger_bun.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Soft round burger bun with sesame.",
+    "tags": [
+      "burger",
+      "sesame"
+    ],
+    "sortOrder": 200,
+    "isActive": true,
+    "imageFileName": "sesame_burger_bun.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1psavHvRZVb3DTlH-h5HHJKfulesbXjO3/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "brioche_burger_bun",
+    "englishName": "Brioche Burger Bun",
+    "arabicName": "خبز برغر بريوش",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/brioche_burger_bun.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Soft enriched brioche burger bun.",
+    "tags": [
+      "burger",
+      "brioche"
+    ],
+    "sortOrder": 210,
+    "isActive": true,
+    "imageFileName": "brioche_burger_bun.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1IryDWW4ghuBSlfKcX4_epQVchINEAne5/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "hot_dog_bun",
+    "englishName": "Hot Dog Bun",
+    "arabicName": "خبز هوت دوغ",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/hot_dog_bun.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Soft long hot dog roll.",
+    "tags": [
+      "sandwich",
+      "roll"
+    ],
+    "sortOrder": 220,
+    "isActive": true,
+    "imageFileName": "hot_dog_bun.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1LKe4KRwg3JGNolsymT-1K67BW_oJnDZ2/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "long_sandwich_bread",
+    "englishName": "Long Sandwich Bread",
+    "arabicName": "خبز ساندويش طويل",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/long_sandwich_bread.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Long sandwich bread roll.",
+    "tags": [
+      "sandwich",
+      "roll"
+    ],
+    "sortOrder": 230,
+    "isActive": true,
+    "imageFileName": "long_sandwich_bread.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/13-_BW-w_8cjARUIhBd4rbDgwDWCJ2Yd9/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "small_bread_roll",
+    "englishName": "Small Bread Roll",
+    "arabicName": "خبز رول صغير",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/small_bread_roll.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Small individual bread roll.",
+    "tags": [
+      "roll"
+    ],
+    "sortOrder": 240,
+    "isActive": true,
+    "imageFileName": "small_bread_roll.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1-r0fuTEk4Mu1bkhKYcH_Z0Osh3HEQKW9/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "potato_bread",
+    "englishName": "Potato Bread",
+    "arabicName": "خبز بطاطا",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/potato_bread.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Soft potato-enriched bread.",
+    "tags": [
+      "potato",
+      "soft"
+    ],
+    "sortOrder": 250,
+    "isActive": true,
+    "imageFileName": "potato_bread.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1HTgqP0sU9wNaU92ATxYSNFjrML9Zapr3/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "khubz_shofan",
+    "englishName": "Oat Bread",
+    "arabicName": "خبز شوفان",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/khubz_shofan.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Bread prepared with oats or oat flour.",
+    "tags": [
+      "oat",
+      "grains"
+    ],
+    "sortOrder": 260,
+    "isActive": true,
+    "imageFileName": "oat_bread.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1VbhSvKqivujA_zm0J-AaxQ0CtAMgRkCa/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "kaak_quds",
+    "englishName": "Jerusalem Kaak",
+    "arabicName": "كعك قدسي",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/kaak_quds.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Oval sesame-coated Jerusalem bread.",
+    "tags": [
+      "sesame",
+      "levantine"
+    ],
+    "sortOrder": 270,
+    "isActive": true,
+    "imageFileName": "jerusalem_kaak.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1e6BXmgHPH3LG3f_9aBSm8cIOCzvh3CDr/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "sesame_kaak",
+    "englishName": "Sesame Kaak",
+    "arabicName": "كعك بالسمسم",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/sesame_kaak.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Traditional sesame-coated bread.",
+    "tags": [
+      "sesame",
+      "kaak"
+    ],
+    "sortOrder": 280,
+    "isActive": true,
+    "imageFileName": "sesame_kaak.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1gcfu_Mn1ITttkqwRtwa8dMmXiXExAEZN/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "khubz_markook",
+    "englishName": "Markook Bread",
+    "arabicName": "خبز مرقوق",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/khubz_markook.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Very thin traditional flatbread.",
+    "tags": [
+      "flatbread",
+      "thin"
+    ],
+    "sortOrder": 290,
+    "isActive": true,
+    "imageFileName": "markook_bread.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/10qyFqxDrbfwj9alDypx9zHcmZH7dpobv/view",
+    "imageStatus": "active"
+  },
+  {
+    "key": "country_wheat_bread",
+    "englishName": "Country Wheat Bread",
+    "arabicName": "خبز قمح بلدي",
+    "imageUrl": "https://vsdjgxiqhgzsfddfqwiz.supabase.co/storage/v1/object/public/uploads/images/bread-types/country_wheat_bread.png",
+    "imageSource": "Khubzati Supabase Storage",
+    "imageCredit": "Re-hosted from Khubzati Google Drive (03 Jordan)",
+    "description": "Rustic wheat bread.",
+    "tags": [
+      "wheat",
+      "rustic"
+    ],
+    "sortOrder": 300,
+    "isActive": true,
+    "imageFileName": "country_wheat_bread.png",
+    "imageDriveFileUrl": "https://drive.google.com/file/d/1LSMLhh0swliW9e0VZZdPSf7nKWTggbBW/view",
+    "imageStatus": "active"
+  }
+]

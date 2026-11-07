@@ -9,6 +9,10 @@ const { authenticateTokenOptional } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rate-limit');
 const { logUploadAudit } = require('../services/uploadAuditService');
 const { scanUploadedFile } = require('../services/malwareScanService');
+const {
+  isSupabaseStorageConfigured,
+  uploadToSupabaseStorage,
+} = require('../lib/supabaseStorage');
 
 const router = express.Router();
 const uploadStorageDriver = String(process.env.UPLOAD_STORAGE_DRIVER || 'local').trim().toLowerCase();
@@ -146,11 +150,51 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-if (uploadStorageDriver !== 'local') {
+// Resolve the effective storage driver once at boot. The `supabase` driver
+// persists uploads to Supabase Storage (durable, CDN-served); `local` writes to
+// the ephemeral `uploads/` dir. An unconfigured/unknown driver warns loudly and
+// falls back to local so a misconfig degrades instead of 500-ing every upload.
+let effectiveStorageDriver = 'local';
+if (uploadStorageDriver === 'supabase') {
+  if (isSupabaseStorageConfigured()) {
+    effectiveStorageDriver = 'supabase';
+  } else {
+    console.error(
+      'UPLOAD_STORAGE_DRIVER=supabase but SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are missing. ' +
+        'Falling back to LOCAL storage, which is ephemeral on Render — uploads will not survive deploys.',
+    );
+  }
+} else if (uploadStorageDriver !== 'local') {
   console.warn(
-    `UPLOAD_STORAGE_DRIVER=${uploadStorageDriver} is not implemented yet. Falling back to local storage.`,
+    `UPLOAD_STORAGE_DRIVER=${uploadStorageDriver} is not implemented. Falling back to local storage.`,
   );
 }
+
+/**
+ * Persist a normalized, scanned upload to the active storage backend and return
+ * the URL to store/serve. For `supabase`, the file is pushed to Supabase Storage
+ * and the local temp copy is removed; for `local`, the file stays on disk and is
+ * served via GET /uploads/:filename.
+ *
+ * @param {object} file   a file object as returned by normalizeUploadedFile()
+ * @param {object} [opts]
+ * @param {string} [opts.folder]  optional sub-folder within the bucket
+ * @returns {Promise<string>} the URL to persist in the DB / return to the client
+ */
+const persistUpload = async (file, { folder = '' } = {}) => {
+  if (effectiveStorageDriver === 'supabase') {
+    const { url } = await uploadToSupabaseStorage({
+      localPath: file.path,
+      filename: file.filename,
+      mimetype: file.mimetype,
+      folder,
+    });
+    // Remove the local temp copy; the durable copy now lives in Supabase.
+    await fs.promises.unlink(file.path).catch(() => {});
+    return url;
+  }
+  return `/uploads/${file.filename}`;
+};
 
 // Configure multer storage
 const extensionByMime = {
@@ -467,10 +511,7 @@ router.post('/document', authenticateTokenOptional, requireAuthenticatedUpload, 
       await fs.promises.unlink(normalizedFile.path).catch(() => {});
       return res.status(422).json({ status: 'fail', message: 'Uploaded file failed security scanning' });
     }
-    const fileUrl = `/uploads/${normalizedFile.filename}`;
-    
-    // In production, you would upload to S3/Cloud Storage and return the CDN URL
-    // const fileUrl = await uploadToS3(req.file);
+    const fileUrl = await persistUpload(normalizedFile);
 
     await logUploadAudit({
       prisma,
@@ -549,7 +590,7 @@ router.post('/image', authenticateTokenOptional, requireAuthenticatedUpload, upl
       await fs.promises.unlink(normalizedFile.path).catch(() => {});
       return res.status(422).json({ status: 'fail', message: 'Uploaded file failed security scanning' });
     }
-    const fileUrl = `/uploads/${normalizedFile.filename}`;
+    const fileUrl = await persistUpload(normalizedFile, { folder: 'images' });
 
     await logUploadAudit({
       prisma,
@@ -635,7 +676,7 @@ router.post('/documents', authenticateTokenOptional, requireAuthenticatedUpload,
 
     const uploadedFiles = [];
     for (const file of normalizedFiles) {
-      const fileUrl = `/uploads/${file.filename}`;
+      const fileUrl = await persistUpload(file);
       uploadedFiles.push({
         fileName: file.originalname,
         fileUrl,
