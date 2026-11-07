@@ -64,6 +64,21 @@ const joinObjectPath = (...parts) =>
         .filter(Boolean)
         .join('/');
 
+// Ensure the target bucket exists (public) before the first upload, so a fresh
+// environment doesn't need the bucket pre-created in the dashboard. Runs at most
+// once per process; best-effort — if creation races or lacks permission, the
+// subsequent upload surfaces the real error.
+let ensuredBucket = null;
+const ensureBucketExists = async (supabase, bucket) => {
+    if (ensuredBucket === bucket) return;
+    const { error } = await supabase.storage.createBucket(bucket, { public: true });
+    // "already exists" is the expected happy path on every run after the first.
+    if (error && !/already exists|Duplicate/i.test(error.message || '')) {
+        console.warn(`Supabase Storage: could not ensure bucket "${bucket}": ${error.message}`);
+    }
+    ensuredBucket = bucket;
+};
+
 /**
  * Upload a local file to Supabase Storage and return its public URL.
  *
@@ -80,6 +95,7 @@ const uploadToSupabaseStorage = async ({ localPath, filename, mimetype, folder =
     const fileBuffer = await fs.promises.readFile(localPath);
 
     const supabase = getClient();
+    await ensureBucketExists(supabase, bucket);
     const { error } = await supabase.storage.from(bucket).upload(objectPath, fileBuffer, {
         contentType: mimetype || 'application/octet-stream',
         upsert: true,
